@@ -1,0 +1,28 @@
+# 10B T2A, clips up to 20 s, started from the EMA weights of the 15 s run (t2a_10b, step 100000).
+# Fresh AdamW, fresh data stream; same five VR-Foley sources and max_records as t2a_10b.
+#
+# Indexes go to their own root: max_seconds is part of every source's fingerprint, and the 15 s run keeps
+# reading outputs/data/index. Clips of 15–20 s that the 15 s run dropped come back (hifitts2, zhizhou).
+#
+# bash scripts/data/build_index.sh --config configs/train/t2a_10b_s20.yaml          # once, before training
+# bash scripts/data/inspect_data.sh --config configs/train/t2a_10b_s20.yaml
+# bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20.yaml data.loader.subset=100 train.max_steps=20 train.run_name=t2a_10b_s20_dry
+# bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20.yaml
+# Re-running the same command resumes the newest stamp of outputs/train/t2a_10b_s20.
+# CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b_s20 infer.seconds=20 'infer.prompts=["Rain on a tin roof."]'
+# bash scripts/train/tensorboard.sh outputs/train/t2a_10b_s20
+_base_: t2a_10b.yaml
+
+audio:
+  max_seconds: 20
+
+data:
+  index_root: ${paths.output_root}/data/index_s20
+
+train:
+  run_name: t2a_10b_s20
+  # Weights only; a later relaunch with resume=auto continues this run's own checkpoints instead.
+  init_from: ${paths.output_root}/train/t2a_10b/checkpoints/step_0100000
+  init_weights: ema
+  max_steps: 20000
+  warmup_steps: 1000
