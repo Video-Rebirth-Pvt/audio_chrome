@@ -1,0 +1,37 @@
+# S2 smoke test: tiny DiT on 500 clips (100 per VR-Foley source), real Qwen3-VL-32B/50 text + frozen H3 VAE.
+# Checks that the whole chain trains, validates, resumes and renders wavs; not a quality run.
+#
+# CUDA_VISIBLE_DEVICES=0 bash scripts/text/cache_text.sh configs/train/t2a_smoke.yaml   # optional: fill the text cache
+# bash scripts/train/train_t2a.sh configs/train/t2a_smoke.yaml                               # all GPUs, DDP
+# bash scripts/train/train_t2a.sh configs/train/t2a_smoke.yaml train.parallel.kind=fsdp train.run_name=t2a_smoke_fsdp
+# CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_smoke infer.steps=30 'infer.prompts=["Heavy rain on a tin roof."]'
+# bash scripts/train/check_t2a_smoke.sh                                                      # end-to-end check
+_base_: t2a_base.yaml
+
+data:
+  loader:
+    subset: 100
+    num_workers: 8
+    prefetch_factor: 2
+  val:
+    per_source: 16
+    num_workers: 2
+
+train:
+  run_name: t2a_smoke
+  max_steps: 600
+  lr: 5.0e-4
+  warmup_steps: 50
+  ema_decay: 0.99
+  log_every: 10
+  val_every: 200
+  val_batches: 8
+  preview_every: 300
+  ckpt_every: 200
+  keep_ckpts: 2
+
+preview:
+  labels: [solo piano, dialogue, zh mandarin female young, rain]
+  seconds: 6
+  train_captions: 5
+  steps: 25

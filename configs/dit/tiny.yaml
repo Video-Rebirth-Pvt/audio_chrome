@@ -1,0 +1,31 @@
+# Pipeline-only DiT (~6M params). head_dim stays 128: MM-RoPE rotates the first 96 dims of every head.
+dit:
+  preset: tiny
+  num_layers: 2
+  hidden_size: 256
+  num_heads: 2
+  head_dim: 128
+  ffn_hidden_size: 768
+  time_embed_dim: 128
+  time_embed_hidden_size: null
+  timestep_input_dim: 256
+  refiner_layers: 2
+  # null: width of the configured text encoder (5120 for Qwen3-VL-32B).
+  text_dim: null
+  audio_dim: 32
+  video_dim: 96
+  modalities: 3
+  rope_freqs_per_axis: 16
+  rope_theta: 10000.0
+  norm_eps: 1.0e-5
+  # per_layer (H3) | shared (adaLN-single style); S2 ablation.
+  adaln: per_layer
+  # Raw Qwen hidden states before condition_proj: none (H3) | rmsnorm (learned, per token) |
+  # stats (fixed per-dim (x − mean) / std, then clamp to ±text_clip). stats reads text_stats, or
+  # <text cache dir>/stats.safetensors when null (written by scripts/text/cache_text.sh).
+  text_norm: none
+  text_clip: null
+  text_stats: null
+  # auto | flash | sdpa
+  attention: auto
+  gradient_checkpointing: false

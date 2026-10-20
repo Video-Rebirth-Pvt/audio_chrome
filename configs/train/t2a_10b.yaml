@@ -1,0 +1,35 @@
+# S3 scale: 10.8B DiT, FSDP2 (sharded fp32 master weights / grads / Adam, bf16 compute), activation
+# checkpointing per block. One node: FSDP over its 8 GPUs. Several nodes: HSDP, shard inside a node and
+# replicate across nodes (train.parallel.shard_size=8). Captions should all be in the text cache: an online
+# Qwen3-VL-32B/50 costs 49 GB per rank and about as much compute as the DiT.
+#
+# bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml
+# New experiment (timestamped):  bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml train.resume=null
+# NNODES=4 NODE_RANK=<0..3> MASTER_ADDR=<node0> bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml train.parallel.shard_size=8
+# 500-clip dry run:  bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml data.loader.subset=100 train.max_steps=20 train.run_name=t2a_10b_dry
+# Infer / export accept the family dir (newest stamp, or this legacy flat run):
+#   CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b 'infer.prompts=["Rain on a tin roof."]'
+#   bash scripts/train/export_t2a.sh outputs/train/t2a_10b --checkpoint 2000 --weights ema
+# TensorBoard:  bash scripts/train/tensorboard.sh outputs/train/t2a_10b
+_base_: [t2a_base.yaml, ../dit/10b.yaml]
+
+train:
+  run_name: t2a_10b
+  stamp_run: true
+  export: ema
+  save_sharded: false
+  parallel:
+    kind: fsdp
+    shard_size: null
+  lr: 1.0e-4
+  warmup_steps: 2000
+  ema_decay: 0.9999
+  val_every: 1000
+  preview_every: 1000
+  ckpt_every: 2000
+  keep_ckpts: 1
+  # All per_source holdout clips (≈256/source, 1237 clips / 45 batches today). 0 = do not prefix-cut.
+  val_batches: 0
+
+preview:
+  train_captions: 0

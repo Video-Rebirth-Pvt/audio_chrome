@@ -1,0 +1,76 @@
+# T2A data pipeline: manifests → per-source Arrow index → token-packed batches of 32 kHz stereo clips.
+# Each source keeps up to data.sources[i].max_records train rows; the loader mixes by those row counts.
+#
+# bash scripts/data/build_index.sh                                  # once, and after manifests change
+# bash scripts/data/inspect_data.sh inspect.world_size=8           # rows, hours, drops, mixture shares
+# bash scripts/data/bench_loader.sh                                 # loader throughput, dumps a few wavs
+# CUDA_VISIBLE_DEVICES=0 bash scripts/data/bench_loader.sh bench.vae=true
+_base_: [../_base_/audio_spec.yaml, ../_base_/paths.yaml, sources_vrfoley.yaml]
+
+data:
+  index_root: ${paths.data_index_root}
+  tokenizer: ${paths.h3_tokenizer}
+  # A clip at most this far past a whole second is cropped down instead of padded up.
+  slack_seconds: 0.1
+  # Longer captions are dropped at index time (lyrics dumps, broken rows).
+  max_text_tokens: 512
+  # Louder clips are scaled down to this peak; quieter ones are left alone (same as VR-Foley).
+  peak: 0.95
+  # Never train on these (preview clips are listened to during training).
+  exclude:
+    - ${paths.preview_set}
+  # Undecodable files found by any run; read at index build and by every loader worker.
+  bad_list: ${paths.output_root}/data/bad_audio.txt
+  extra_bad_lists:
+    - ${paths.vrfoley_root}/audio_pretrain/outputs/bad_audio.txt
+  # Build / inspect only these sources, e.g. data.only=[music,freesound]. The loader always uses all.
+  only: null
+  source_defaults:
+    task: misc
+    # null: mix by how many train rows this source kept. A number over/under-samples after the cap.
+    weight: null
+    fit: pad
+    long: drop
+    # Rows whose path hash falls in this many per million are held out; stable as data is added.
+    holdout_ppm: 500
+  build:
+    workers: 64
+    # JSONL is split into byte ranges of this size, one per worker task.
+    chunk_mb: 64
+    force: false
+  loader:
+    # One micro-batch = one packed DiT sequence: Σ(80 rows per second + caption tokens) ≤ max_tokens.
+    max_tokens: 24840
+    max_samples: 64
+    num_workers: 12
+    prefetch_factor: 4
+    seed: 22
+    # Caption replaced by " " (H3's unconditional prompt) for CFG.
+    cfg_drop: 0.1
+    crop: random
+    # Train on only the first N rows of every source by path hash (smoke tests); null = all rows.
+    subset: null
+  val:
+    # Holdout clips per source, smallest path hash first (stable). 0 holdout → source skipped.
+    per_source: 256
+    # Safety cap on the sum across sources (0 = off). Shared fairly; a new source cannot zero an old one.
+    max_total_clips: 2048
+    num_workers: 4
+
+inspect:
+  world_size: 8
+  grad_accum: 1
+  steps: 100000
+  duplicates: true
+
+bench:
+  batches: 200
+  warmup: 10
+  rank: 0
+  world_size: 1
+  vae: false
+  vae_checkpoint: ${paths.h3_audio_vae}
+  device: cuda
+  allow_tf32: false
+  dump: 8
+  output_dir: ${paths.output_root}/data/bench

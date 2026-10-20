@@ -1,0 +1,10 @@
+# Audio contract. Codec, data and DiT configs all inherit this file; change it here only.
+# 32 kHz / hop 800 → 40 latent frames per second per ear, 32 channels each.
+# One second is exactly 40 frames, so whole-second buckets need no rounding.
+audio:
+  sample_rate: 32000
+  channels: 2
+  hop_length: 800
+  latent_channels: 32
+  min_seconds: 4
+  max_seconds: 15

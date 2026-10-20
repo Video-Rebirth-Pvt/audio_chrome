@@ -1,0 +1,13 @@
+# H3 text encoder: Qwen3-VL-32B language model, first num_layers layers, last layer un-normed (dim 5120).
+# 50 layers ≈ 24.4B params ≈ 49 GB bf16; loaded only on the first caption missing from the cache.
+text:
+  kind: qwen3_vl
+  path: ${paths.h3_text_encoder}
+  num_layers: 50
+  dtype: bfloat16
+  # Padded tokens per encoder forward.
+  batch_tokens: 32768
+  cache:
+    # One safetensors file per caption (≈ L × 5120 × 2 bytes) under <dir>/<encoder fingerprint hash>/.
+    dir: ${paths.output_root}/text_cache
+    memory_items: 4096

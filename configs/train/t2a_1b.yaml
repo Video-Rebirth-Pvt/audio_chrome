@@ -1,0 +1,18 @@
+# S2 ablation baseline: 1B DiT on the full VR-Foley mixture, FSDP over all ranks. Ablations are overrides:
+#   dit.adaln=shared | flow.shift=5 | text.num_layers=32 | dit.text_norm=stats | data.sources[...].max_records
+#
+# bash scripts/train/train_t2a.sh configs/train/t2a_1b.yaml
+# bash scripts/train/train_t2a.sh configs/train/t2a_1b.yaml dit.adaln=shared train.run_name=t2a_1b_shared
+# 500-clip dry run:  bash scripts/train/train_t2a.sh configs/train/t2a_1b.yaml data.loader.subset=100 train.max_steps=20 train.run_name=t2a_1b_dry
+_base_: [t2a_base.yaml, ../dit/1b.yaml]
+
+train:
+  run_name: t2a_1b
+  parallel:
+    kind: fsdp
+  lr: 2.0e-4
+  warmup_steps: 2000
+  preview_every: 5000
+
+preview:
+  train_captions: 0

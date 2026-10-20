@@ -1,0 +1,6 @@
+# Fixed random token table instead of Qwen: dry runs of the trainer without loading 49 GB.
+text:
+  kind: random
+  dim: 256
+  seed: 0
+  cache: null

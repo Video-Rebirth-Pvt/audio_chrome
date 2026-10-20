@@ -1,0 +1,59 @@
+# VR-Foley audio_pretrain sources. Mix is the number of train rows you keep, not a sampling weight.
+#
+# max_records: how many train rows this source contributes (stable path-hash order).
+# null / omit = keep every row that passes filters. Rebuild after you change it:
+#   bash scripts/data/build_index.sh
+#   bash scripts/data/build_index.sh data.only=[music] data.build.force=true
+#   bash scripts/data/inspect_data.sh
+#   bash scripts/data/inspect_data.sh data.sources.0.max_records=2000000
+#
+# Per-source keys (defaults in data.source_defaults):
+#   name, task, paths (files or directories of .jsonl / .parquet)
+#   columns: {audio, caption, duration, sample_rate}
+#   keep: {field: value} or {field: {min, max, allow_missing}}
+#   fit: pad | crop      pad rounds up; crop rounds down to a random window
+#   long: drop | crop    clips past max_seconds + slack
+#   caption_prefix, max_records, holdout_ppm
+#   weight (optional): only if you must over/under-sample a source after the cap.
+#     omit it and the loader samples in proportion to the rows you kept.
+data:
+  sources:
+    - name: music
+      task: music
+      max_records: 1200000
+      # A cut-off song plus silence sounds wrong; drop the tail instead.
+      fit: crop
+      columns: {caption: resp_new}
+      paths:
+        - ${paths.data_root}/llp/data/cleaned_jsonl_0922/cleaned_music1_train1.jsonl
+        - ${paths.data_root}/llp/data/cleaned_jsonl_0922/cleaned_music2_train.jsonl
+        - ${paths.data_root}/llp/data/cleaned_jsonl_0922/cleaned_music3_train.jsonl
+        - ${paths.data_root}/llp/data/cleaned_jsonl_0922/cleaned_music4_train.jsonl
+        - ${paths.data_root}/llp/data/cleaned_jsonl_0922/cleaned_music5_train.jsonl
+        - ${paths.data_root}/llp/data/cleaned_jsonl_0922/cleaned_music6_train.jsonl
+    - name: freesound
+      task: sfx
+      max_records: 500000
+      paths:
+        - ${paths.data_root}/FreeSound/freesound.jsonl
+    - name: audioset
+      task: sfx
+      max_records: 500000
+      paths:
+        - ${paths.data_root}/AudioSet/audioset_unbaltrain.jsonl
+    - name: hifitts2
+      task: speech_en
+      max_records: 4000000
+      columns: {caption: resp, duration: duration}
+      paths:
+        - ${paths.data_root}/SPEECH/hifitts-2/manifest_44khz.jsonl
+    # 16 kHz mono; nothing above 8 kHz after resampling to 32 kHz.
+    - name: zhizhou
+      task: speech_zh
+      max_records: 7000000
+      columns: {caption: resp, duration: duration}
+      keep:
+        bw_flag: ok
+        cer: {max: 0.25}
+      paths:
+        - ${paths.data_root}/zhizhou_soul/manifest_16khz.jsonl

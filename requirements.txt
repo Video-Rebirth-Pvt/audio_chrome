@@ -1,0 +1,9 @@
+torch>=2.4
+torchaudio>=2.4
+safetensors>=0.4
+numpy
+pyyaml
+omegaconf>=2.3
+soundfile
+einops
+tensorboard

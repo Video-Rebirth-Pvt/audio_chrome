@@ -1,0 +1,13 @@
+# Run artifacts: checkpoints, indexes, text cache, logs, bench dumps.
+outputs/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+
+.vscode/
+.idea/
+.cursor/
+.DS_Store

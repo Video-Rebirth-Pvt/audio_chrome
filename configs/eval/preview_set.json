@@ -1,0 +1,146 @@
+[
+  {
+    "domain": "music",
+    "slot": 0,
+    "label": "solo piano",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/llp/data/music2_clip/(01) Piano Concerto No.3 in C minor Op.37 - I.Allegro con brio_slice_80.flac",
+    "caption": "[MUSIC]: <d>A virtuosic piano cascades in a dramatic atmosphere, weaving a complex musical tapestry. This solo piano piece, characteristic of late Romantic or early 20th-century classical music, features no vocals. The instrument performs rapid arpeggios and intricate melodic runs across its full range, demonstrating a high level of technical skill. The music conveys a theme of intense, restless energy, shifting between powerful, fortissimo chords and delicate, pianissimo passages. This dynamic contrast creates a turbulent and emotionally charged atmosphere. The recording quality is clear and resonant, capturing the rich harmonic overtones and percussive attack of the grand piano with excellent fidelity, suggesting a modern, high-quality studio or concert hall recording.</d>",
+    "duration": 10.1
+  },
+  {
+    "domain": "music",
+    "slot": 1,
+    "label": "acoustic guitar",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/llp/data/music2_clip/(01) La Forqueray (Troisieme livre de pieces de clavecin, 1756)_slice_23.flac",
+    "caption": "[MUSIC]: <d>An acoustic guitar weaves through a contemplative atmosphere with intricate fingerpicking. This instrumental piece, characteristic of solo acoustic folk or classical guitar, features no vocals. The steel-string guitar provides both melody and harmony, with a clear, bright tone and a moderate tempo. The performance showcases complex arpeggiated chords and melodic runs across the fretboard, suggesting a high level of technical skill. The music conveys a theme of thoughtful introspection, creating a calm and intimate sonic environment. The recording quality is clean and direct, capturing the natural resonance and subtle nuances of the instrument's performance with minimal processing, resulting in a dry, present sound that highlights the musician's dexterity.</d>",
+    "duration": 10.1
+  },
+  {
+    "domain": "speech",
+    "slot": 0,
+    "label": "dialogue",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/hifitts-2/audio_44khz/16/1525/16_1525_fame_fortune_0910_librivox-fameandfortune_01_alger_46.flac",
+    "caption": "[SPEECH]: <d>[English] Yes,\" said Dick, \"and I might have saved more if I'd begun sooner.\" \"How long has it taken you to save it up?\" \"About nine months.</d>",
+    "duration": 9.92
+  },
+  {
+    "domain": "speech",
+    "slot": 1,
+    "label": "narration",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/hifitts-2/audio_44khz/20/1347/20_1347_daisy_miller_0708_librivox-daisymiller_1_james_19.flac",
+    "caption": "[SPEECH]: <d>[English] he had been put to school there as a boy, and he had afterward gone to college there - circumstances which had led to his forming a great many youthful friendships.</d>",
+    "duration": 10.48
+  },
+  {
+    "domain": "freesound",
+    "slot": 0,
+    "label": "footsteps",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/FreeSound/train/113405_frame_30_40.flac",
+    "caption": "This audio features footsteps crunch on a gravelly surface in a quiet outdoor environment. The detailed audio description is a quiet, open outdoor space. The primary sound is the rhythmic crunching and grinding of footsteps on a loose surface, likely gravel, dry leaves, or crusty snow. First footsteps begin, characterized by a sharp, crunching sound with each step.",
+    "duration": 10.0
+  },
+  {
+    "domain": "freesound",
+    "slot": 1,
+    "label": "rock drums",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/FreeSound/train/405549_frame_90_100.flac",
+    "caption": "This audio features a drum fill introduces a rock beat with a cymbal crash. The detailed audio description is a studio or performance space. First a rapid drum fill plays across several tom-toms, descending in pitch. Then a kick drum and snare drum establish a steady rock beat. Finally a cymbal crashes and sustains. This audio contains music. The music description is a Rock piece with instruments like Drum kit (tom-toms, kick drum, snare drum, cymbals), tempo is medium-fast, emotional tone is energetic and driving.",
+    "duration": 10.0
+  },
+  {
+    "domain": "audioset",
+    "slot": 0,
+    "label": "bird call",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/AudioSet/data/audio/unbal_train/pKZR180SZKU.flac",
+    "caption": "This audio features a bird chirps in an outdoor setting with a distinct, sharp call. The detailed audio description is an outdoor, natural environment. The primary sound is a bird call. First a bird emits a series of sharp, high-pitched chirps. Finally the bird emits a second, similar series of chirps.",
+    "duration": 10.0
+  },
+  {
+    "domain": "audioset",
+    "slot": 1,
+    "label": "rain",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/AudioSet/data/audio/unbal_train/FCtJs4O5Vaw.flac",
+    "caption": "This audio features rain falls steadily in an outdoor environment. The detailed audio description is an outdoor setting during a rain shower. The primary sound is the continuous, percussive impact of raindrops striking a surface, creating a dense and layered soundscape. The sound suggests a moderate to heavy rainfall.",
+    "duration": 10.0
+  },
+  {
+    "domain": "music",
+    "slot": 2,
+    "label": "vocal lyric",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/llp/data/music4_clip/(01) [Michael Jackson] 01 - billie jean_slice_24.flac",
+    "caption": "[MUSIC]: <d>A funky bassline grooves in an upbeat atmosphere with a vibrant female vocal. This Disco-Funk track features a high-pitched female voice singing in English with a fast, energetic delivery. The vocalist sings the phrase <S> She knows what's going on <E> over a dense arrangement driven by a prominent electric bass, a four-on-the-floor drum machine beat, and rhythmic electric guitar chords. The music conveys a theme of confident awareness, creating a lively and danceable atmosphere. The production quality is polished and bright, with a clean mix that emphasizes the rhythmic interplay between the bass, drums, and vocals, characteristic of late 1970s or early 1980s funk and disco production styles.</d>",
+    "duration": 10.1
+  },
+  {
+    "domain": "speech",
+    "slot": 2,
+    "label": "zh mandarin male young",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/ffe45c31-be0d-409e-bd70-98b96db8a74a.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Male][Young] 啊，喜欢喝绿茶，没问题。我家里面冰箱还有，今年明前龙井，到时候给你带一个，一小罐，泡一跑喝，一喝。</d>",
+    "duration": 9.33
+  },
+  {
+    "domain": "speech",
+    "slot": 3,
+    "label": "zh mandarin female young",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/d7cfce75-a3ee-4690-a525-e84f5783cbd4.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Female][Young] 其实生存类游戏你要玩明白也是挺难的 你像那缺氧 哎呦 你得自己学好多知识呢</d>",
+    "duration": 10.338
+  },
+  {
+    "domain": "speech",
+    "slot": 4,
+    "label": "zh mandarin male adult",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/1c074a20-ec5f-4a32-ad5a-4aefe27e9576.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Male][Adult] 烤箱那个没有灵魂，你知道吧？烧烤这个东西嘛，对吧？需要有火、有烟，哎，这个才有那个烧烤的灵魂在。</d>",
+    "duration": 10.27
+  },
+  {
+    "domain": "speech",
+    "slot": 5,
+    "label": "zh mandarin female middle",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/57e327cf-e338-4e94-acd0-23ff386cb702.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Female][Middle][Whisper] 你们那边的人喜欢吃辣吗？哎呀，我不晓得，哪里的人就是口味会重一点，反正我的话，我也是顿顿想要吃点辣的。</d>",
+    "duration": 11.57
+  },
+  {
+    "domain": "speech",
+    "slot": 6,
+    "label": "zh sichuan male adult",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/8de4a438-ba32-41bb-b596-5134dea81f9c.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Sichuan][Male][Adult][Sigh] 嗯，不对，听，哎呀，听不出来了，听不出来了，你直接跟我说噻，那到底是哪儿的嘛？</d>",
+    "duration": 11.1
+  },
+  {
+    "domain": "speech",
+    "slot": 7,
+    "label": "zh cantonese female adult",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/2087c1fd-db39-49d2-aa30-c082c4793132.wav",
+    "caption": "[SPEECH]: <d>[Cantonese][Cantonese][Female][Adult] 好多人好难搞啊？五号那的呀？五号那个我没难过哦，反正清楚了也没得分要回来。</d>",
+    "duration": 10.14
+  },
+  {
+    "domain": "speech",
+    "slot": 8,
+    "label": "zh taiwan male young",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/dae32fea-957b-4821-8300-86dbbf76b4f6.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Taiwan][Male][Young] 那样子就是太过于以自我为中心了，反正好像都是要按他的想法来，那确实是不太好。</d>",
+    "duration": 8.93
+  },
+  {
+    "domain": "speech",
+    "slot": 9,
+    "label": "zh mandarin female adult whisper",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/11d6002d-4723-4d53-a622-5e9734bfe518.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Female][Adult][Whisper] 就是顾客这边说说点了我要点这道菜，然后那边厨师就开始已经炒了，他是完全可以看见的。</d>",
+    "duration": 12.89
+  },
+  {
+    "domain": "speech",
+    "slot": 10,
+    "label": "zh mandarin male adult singing",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/c8c8d3dc-7add-4919-9951-c8712f9e4839.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Male][Adult][Singing] 我怕来不及，我要抱着你，直到感觉你的皱纹有了岁月的痕迹。</d>",
+    "duration": 12.828
+  }
+]

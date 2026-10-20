@@ -1,0 +1,128 @@
+# S2 T2A training: task + data pipeline + DiT preset + text encoder + flow + parallel strategy + trainer.
+# Swap pieces through _base_ or overrides, e.g. dit preset (configs/dit/1b.yaml), dit.adaln=shared,
+# flow.shift=5, text.num_layers=32, train.parallel.kind=fsdp.
+#
+# bash scripts/train/train_t2a.sh configs/train/t2a_smoke.yaml
+# bash scripts/infer/infer_t2a.sh outputs/train/t2a_smoke 'infer.prompts=["Rain on a tin roof."]'
+_base_: [../data/t2a_base.yaml, ../dit/tiny.yaml, ../text/qwen3vl_32b.yaml]
+
+task:
+  # Registered in chrome/tasks/ (t2a). S4 distillation / S5 video add their own.
+  kind: t2a
+
+vae:
+  checkpoint: ${paths.h3_audio_vae}
+  # Keep the encoder exact (TF32 moves encode by ~5e-2, see skills.md).
+  allow_tf32: false
+
+layout:
+  # chrome/dit/layout.py: t2a = [text | audio L | audio R] per sample.
+  kind: t2a
+  # Where the two ears sit on the RoPE w axis. canvas: H3's 16:9 video canvas ends (−5.17 / 36.16);
+  # fixed: {kind: fixed, values: [wL, wR]}.
+  stereo_w: {kind: canvas, latent_h: 48, latent_w: 84}
+
+flow:
+  # σ = s·u / (1 + (s−1)·u); training and inference share it. H3 audio uses 3.
+  shift: 3.0
+  # shifted_uniform | logit_normal (sampler_args: {mean, std})
+  timestep_sampler: shifted_uniform
+  sampler_args: {}
+  # token: every audio row weighs the same; sample: mean per clip first.
+  loss_reduction: token
+
+train:
+  run_name: t2a_base
+  output_dir: ${paths.output_root}/train/${train.run_name}
+  # true: each fresh experiment is <output_dir>/<YYYYMMDD_HHMMSS>/. resume=auto continues the newest stamp
+  # (or a legacy flat run). resume=null always opens a new stamp. Infer/export accept the family dir.
+  stamp_run: false
+  # Written by the trainer when stamp_run creates a timed subdir (YYYYMMDD_HHMMSS).
+  started_at: null
+  # auto: continue from <output_dir>/checkpoints/latest if present; null: fresh; or a step / path.
+  resume: auto
+  # Fresh runs only: start from these weights (a run dir → latest, a step dir, or a .safetensors file);
+  # no optimizer or data state. init_weights picks ema / model inside a checkpoint.
+  init_from: null
+  init_weights: ema
+  parallel:
+    # ddp: replicated fp32 weights (≤ ~1B). fsdp: FSDP2, weights / grads / Adam states sharded (1B, 10B).
+    kind: ddp
+    # fsdp only. shard_size: ranks per shard group; null = all ranks (single node: FSDP over 8 GPUs);
+    # 8 on several nodes = HSDP (shard inside a node, replicate across nodes).
+    # shard_size: null
+    # reshard_after_forward: true      # false keeps gathered block weights until backward (more memory)
+    # sync_every_micro: true           # false: one gradient reduce per step (full-size grads in memory)
+  # Seconds before a collective times out (one rank loading Qwen on a cache miss, big checkpoint writes).
+  dist_timeout_minutes: 30
+  seed: 1234
+  max_steps: 100000
+  grad_accum: 1
+  precision: bf16
+  allow_tf32: true
+  lr: 1.0e-4
+  lr_schedule: constant
+  warmup_steps: 1000
+  min_lr_ratio: 0.1
+  betas: [0.9, 0.95]
+  eps: 1.0e-8
+  weight_decay: 0.01
+  grad_clip: 1.0
+  ema_decay: 0.999
+  log_every: 20
+  # <run_dir>/tb scalars + preview wavs. Serve: bash scripts/train/tensorboard.sh <run_dir>
+  tensorboard: true
+  tensorboard_audio: true
+  val_every: 2000
+  # Extra batch budget after per_source packing (split over ranks). 0 = every packed batch.
+  # The budget is shared across sources; it never drops a later dataset the way a prefix slice did.
+  val_batches: 0
+  preview_every: 5000
+  ckpt_every: 2000
+  keep_ckpts: 3
+  # true: torch.distributed.checkpoint shards (smoke / 1B). false: one unsharded snapshot per step
+  # (model.safetensors + ema.safetensors + optimizer.pt), no state/ directory.
+  save_sharded: true
+  # Also write single-file fp32 weights into a sharded checkpoint: none | ema | model.
+  # With save_sharded=false the full snapshot already includes ema / model / optimizer.
+  export: none
+
+preview:
+  set: ${paths.preview_set}
+  # Subset of preview_set.json labels; empty = all 18.
+  labels: []
+  # Fixed length for every preview clip; null = each clip's own duration rounded into 4–15 s.
+  seconds: null
+  # Also render this many training captions (first rows of each source) to check fitting.
+  train_captions: 0
+  # chrome/flow/sampler.py registry (euler).
+  sampler: euler
+  steps: 50
+  cfg_scale: 4.0
+  seed: 0
+  # Captions per packed sequence; every rank renders an equal share of the items.
+  batch: 8
+  use_ema: true
+
+infer:
+  checkpoint: latest
+  weights: ema
+  # Captions, or {caption, seconds, name} entries; or a JSON / JSONL file of such entries.
+  prompts: []
+  prompt_file: null
+  seconds: 10
+  sampler: euler
+  steps: 50
+  cfg_scale: 4.0
+  seed: 0
+  batch: 8
+  # null: <run_dir>/infer
+  output_dir: null
+
+text_cache:
+  # Captions per encoder call when filling the cache (scripts/text/cache_text.sh).
+  batch: 64
+  # Per-dim mean / std over this many captions → <cache dir>/stats.safetensors (dit.text_norm=stats).
+  stats_captions: 512
+  # Cap rows per source (null: the whole train subset + holdout set).
+  max_rows: null

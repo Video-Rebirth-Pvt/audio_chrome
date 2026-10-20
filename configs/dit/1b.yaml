@@ -1,0 +1,10 @@
+# S2 ablation scale: 1.320B total, 0.736B backbone, 0.513B AdaLN (per_layer).
+_base_: tiny.yaml
+dit:
+  preset: 1b
+  num_layers: 24
+  hidden_size: 1536
+  num_heads: 12
+  ffn_hidden_size: 4608
+  time_embed_dim: 768
+  gradient_checkpointing: true

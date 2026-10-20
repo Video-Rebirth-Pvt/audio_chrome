@@ -1,0 +1,16 @@
+# Relative paths resolve from the Chrome-10B root; every launcher cds there first.
+paths:
+  h3_root: /mnt/data04/480634/public/2_CKPT/3_PreTRAINED/MiniMax-H3
+  h3_audio_vae: ${paths.h3_root}/FL2VA/audio_vae
+  h3_audio_vae_diffusers: ${paths.h3_root}/audio_vae
+  h3_text_encoder: ${paths.h3_root}/text_encoder
+  # tokenizer_config.json adds <d>, </d> and the lyrics/caption markers (ids 151669–151675).
+  h3_tokenizer: ${paths.h3_root}/tokenizer
+  diffsynth_root: /mnt/data04/480634/728342682@qq.com/1_CODE/H3/DiffSynth-Studio
+  vrfoley_root: /mnt/data04/480634/728342682@qq.com/1_CODE/AUDIO/PreTrain/VR-Foley-5.5B
+  # Audio corpora and their JSONL manifests (read-only).
+  data_root: /mnt/data04/480634/public/0_DATA/1_AUDIO
+  preview_set: configs/eval/preview_set.json
+  output_root: outputs
+  # Built by scripts/data/build_index.sh; a few GB per ten million rows.
+  data_index_root: ${paths.output_root}/data/index

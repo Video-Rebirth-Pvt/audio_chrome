@@ -1,0 +1,3279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chrome-10B 工程说明 | 32 kHz 立体声 T2A 链路</title>
+<style>
+  :root {
+    --bg: #0b1020;
+    --border: rgba(148, 163, 184, 0.18);
+    --text: #e8eefc;
+    --muted: #9aa8c7;
+    --primary: #6ea8ff;
+    --accent: #7cf0c4;
+    --warn: #ffc857;
+    --danger: #ff7b72;
+    --purple: #c4a0ff;
+    --orange: #ff8a4c;
+    --shadow: 0 18px 50px rgba(0,0,0,.35);
+    --radius: 18px;
+    --max: 1180px;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    background:
+      radial-gradient(1200px 600px at 10% -10%, rgba(255,138,76,.16), transparent 55%),
+      radial-gradient(900px 500px at 90% 0%, rgba(110,168,255,.12), transparent 50%),
+      radial-gradient(800px 600px at 50% 100%, rgba(124,240,196,.08), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    line-height: 1.75;
+  }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 28px 20px 80px; }
+  .hero {
+    position: relative; overflow: hidden;
+    border: 1px solid var(--border);
+    background: linear-gradient(145deg, rgba(22,31,56,.95), rgba(17,24,45,.92));
+    border-radius: 28px; padding: 36px 34px 30px;
+    box-shadow: var(--shadow); margin-bottom: 28px;
+  }
+  .hero::before {
+    content: ""; position: absolute; inset: -40% auto auto 55%;
+    width: 420px; height: 420px;
+    background: radial-gradient(circle, rgba(255,138,76,.22), transparent 65%);
+    pointer-events: none;
+  }
+  .badge-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+  .badge {
+    display: inline-flex; font-size: 12px; padding: 6px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: rgba(255,255,255,.04); color: var(--muted);
+  }
+  .badge strong { color: var(--orange); font-weight: 700; }
+  h1 { margin: 0 0 12px; font-size: clamp(1.45rem, 2.5vw, 2.2rem); line-height: 1.25; letter-spacing: -.02em; }
+  .subtitle { color: var(--muted); font-size: 1.02rem; max-width: 980px; margin: 0 0 18px; }
+  .meta-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+    gap: 12px; margin-top: 18px;
+  }
+  .meta-item {
+    background: rgba(255,255,255,.03); border: 1px solid var(--border);
+    border-radius: 14px; padding: 12px 14px;
+  }
+  .meta-item .k { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .meta-item .v { font-weight: 650; font-size: 14px; }
+  nav.toc {
+    position: sticky; top: 12px; z-index: 20; backdrop-filter: blur(14px);
+    background: rgba(11,16,32,.72); border: 1px solid var(--border);
+    border-radius: 999px; padding: 10px; margin-bottom: 28px;
+    overflow-x: auto; white-space: nowrap;
+  }
+  nav.toc a {
+    display: inline-block; color: var(--muted); padding: 8px 14px;
+    border-radius: 999px; font-size: 13px; text-decoration: none;
+  }
+  nav.toc a:hover { color: var(--text); background: rgba(255,255,255,.05); }
+  .section {
+    margin-bottom: 26px; border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(22,31,56,.92), rgba(18,26,47,.92));
+    border-radius: var(--radius); padding: 26px 24px; box-shadow: var(--shadow);
+  }
+  .section h2 {
+    margin: 0 0 14px; font-size: 1.35rem;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .section h2 .num {
+    width: 34px; height: 34px; border-radius: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, rgba(255,138,76,.28), rgba(110,168,255,.15));
+    border: 1px solid var(--border); color: var(--orange); font-size: 14px; font-weight: 800;
+  }
+  h3 { margin: 22px 0 10px; font-size: 1.08rem; color: #dce7ff; }
+  h4 { margin: 16px 0 8px; color: var(--accent); font-size: .98rem; }
+  p { margin: 0 0 12px; color: #d7e0f5; }
+  ul, ol { margin: 0 0 14px; padding-left: 1.25rem; color: #d7e0f5; }
+  li { margin: 6px 0; }
+  .dim { color: var(--muted); font-size: 14px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; }
+  @media (max-width: 880px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    nav.toc { border-radius: 16px; white-space: normal; }
+  }
+  .card {
+    background: rgba(255,255,255,.03); border: 1px solid var(--border);
+    border-radius: 16px; padding: 16px;
+  }
+  .card h4 { margin-top: 0; }
+  .callout {
+    border-left: 4px solid var(--primary); background: rgba(110,168,255,.08);
+    border-radius: 0 14px 14px 0; padding: 14px 16px; margin: 14px 0;
+  }
+  .callout.good { border-left-color: var(--accent); background: rgba(124,240,196,.08); }
+  .callout.warn { border-left-color: var(--warn); background: rgba(255,200,87,.08); }
+  .callout.danger { border-left-color: var(--danger); background: rgba(255,123,114,.08); }
+  .callout.orange { border-left-color: var(--orange); background: rgba(255,138,76,.1); }
+  .callout .title { font-weight: 750; margin-bottom: 6px; color: var(--text); }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 13.5px;
+    margin: 12px 0 16px; overflow: hidden; border-radius: 14px; border: 1px solid var(--border);
+  }
+  th, td {
+    border-bottom: 1px solid var(--border); padding: 10px 12px;
+    text-align: left; vertical-align: top;
+  }
+  th { background: rgba(255,138,76,.12); color: #ffe0cc; font-weight: 700; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  code, .mono {
+    font-family: var(--mono); font-size: .9em;
+    background: rgba(255,255,255,.05); border: 1px solid var(--border);
+    padding: 1px 6px; border-radius: 5px; color: #b9d4ff;
+  }
+  pre {
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+    background: #0a0f1c; border: 1px solid var(--border);
+    border-radius: 14px; padding: 14px 16px; overflow-x: auto;
+    color: #c8d6f0; margin: 10px 0 16px;
+  }
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    padding: 2px 8px; border-radius: 999px; margin-right: 4px; border: 1px solid var(--border);
+  }
+  .tag.g { color: var(--accent); background: rgba(124,240,196,.1); }
+  .tag.b { color: var(--primary); background: rgba(110,168,255,.1); }
+  .tag.w { color: var(--warn); background: rgba(255,200,87,.1); }
+  .tag.o { color: var(--orange); background: rgba(255,138,76,.12); }
+  .tag.d { color: var(--danger); background: rgba(255,123,114,.1); }
+  .kpi {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px; margin: 12px 0 18px;
+  }
+  .kpi .item {
+    background: rgba(255,255,255,.03); border: 1px solid var(--border);
+    border-radius: 14px; padding: 12px; text-align: center;
+  }
+  .kpi .n { font-size: 1.2rem; font-weight: 800; color: var(--orange); letter-spacing: -.02em; }
+  .kpi .l { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .flow {
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.7;
+    background: #0a0f1c; border: 1px solid var(--border);
+    border-radius: 14px; padding: 14px 16px; color: #c8d6f0;
+    overflow-x: auto; margin: 10px 0 16px;
+  }
+  .flow .hi { color: var(--accent); }
+  .flow .mid { color: var(--warn); }
+  .flow .cool { color: var(--primary); }
+  .flow .o { color: var(--orange); }
+  .flow .pur { color: var(--purple); }
+  footer {
+    margin-top: 12px; color: var(--muted); font-size: 13px;
+    border-top: 1px solid var(--border); padding-top: 18px;
+  }
+  .phase {
+    border: 1px dashed var(--border);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin: 10px 0;
+    background: rgba(255,255,255,.02);
+  }
+  .phase .ph {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .phase.green .ph { color: #7cf0c4; }
+  .phase.gold .ph { color: #ffc857; }
+  .phase.purple .ph { color: #c4a0ff; }
+  .phase.teal .ph { color: #5eead4; }
+  .pack-bar {
+    display: flex; gap: 6px; margin: 12px 0 8px; flex-wrap: wrap; font-size: 12.5px;
+  }
+  .pack-bar .seg {
+    border-radius: 12px; padding: 12px 14px; flex: 1 1 150px;
+    border: 1px solid var(--border);
+  }
+  .pack-bar .seg .who { font-weight: 750; }
+  .pack-bar .seg .meta {
+    color: var(--muted); font-size: 11.5px; margin-top: 4px; font-family: var(--mono); line-height: 1.45;
+  }
+  .pack-bar .seg.vid { background: rgba(255,138,76,.13); }
+  .pack-bar .seg.txt { background: rgba(196,160,255,.13); }
+  .pack-bar .seg.aud { background: rgba(124,240,196,.12); }
+  .pack-bar .seg.pad { background: rgba(148,163,184,.08); }
+  .lut {
+    display: grid;
+    grid-template-columns: 92px 1fr 1fr 1fr;
+    gap: 6px;
+    margin: 12px 0 8px;
+    font-size: 12px;
+  }
+  .lut .h, .lut .c, .lut .r {
+    border-radius: 10px; padding: 10px 8px; text-align: center;
+  }
+  .lut .h { color: var(--muted); font-weight: 700; }
+  .lut .h.vid { color: #ffb086; }
+  .lut .h.txt { color: #d4b8ff; }
+  .lut .h.aud { color: #9af0d0; }
+  .lut .r {
+    font-family: var(--mono); color: var(--warn); text-align: right;
+    padding-right: 6px; display: flex; align-items: center; justify-content: flex-end;
+  }
+  .lut .c {
+    border: 1px solid var(--border); background: rgba(255,255,255,.03);
+    line-height: 1.45;
+  }
+  .lut .c .cell { font-weight: 750; }
+  .lut .c .sub { color: var(--muted); font-size: 11px; }
+  .lut .c.off { opacity: .45; }
+  .flow-lane {
+    border: 1px dashed var(--border);
+    border-radius: 16px;
+    padding: 14px 14px 8px;
+    margin: 12px 0 16px;
+    background: rgba(255,255,255,.02);
+  }
+  .flow-lane .lane-h {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+    text-transform: uppercase; margin: 0 0 10px; color: var(--muted);
+  }
+  .flow-lane.offline .lane-h { color: #c4a0ff; }
+  .flow-lane.train .lane-h { color: #ff8a4c; }
+  .flow-lane.infer .lane-h { color: #7cf0c4; }
+  .nodes {
+    display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px;
+  }
+  .node {
+    flex: 1 1 140px; min-width: 128px;
+    border: 1px solid var(--border); border-radius: 14px;
+    padding: 10px 12px; background: rgba(10,15,28,.55);
+  }
+  .node .who { font-weight: 750; font-size: 13.5px; }
+  .node .mod { font-family: var(--mono); font-size: 11px; color: var(--primary); margin: 3px 0; }
+  .node .shape { font-family: var(--mono); font-size: 11px; color: var(--accent); line-height: 1.45; }
+  .node .note { color: var(--muted); font-size: 11.5px; margin-top: 4px; line-height: 1.4; }
+  .node.purple { box-shadow: inset 3px 0 0 #c4a0ff; }
+  .node.orange { box-shadow: inset 3px 0 0 #ff8a4c; }
+  .node.green { box-shadow: inset 3px 0 0 #7cf0c4; }
+  .node.blue { box-shadow: inset 3px 0 0 #6ea8ff; }
+  .node.warn { box-shadow: inset 3px 0 0 #ffc857; }
+  .node.dim { opacity: .55; }
+  .arrow-row {
+    display: flex; justify-content: center; color: var(--muted);
+    font-size: 18px; line-height: 1; margin: 2px 0 6px; letter-spacing: 4px;
+  }
+  .split-2 {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+  @media (max-width: 880px) { .split-2 { grid-template-columns: 1fr; } }
+  .mem-bar {
+    display: flex; height: 28px; border-radius: 10px; overflow: hidden;
+    border: 1px solid var(--border); margin: 10px 0 8px; font-size: 11px;
+    font-family: var(--mono);
+  }
+  .mem-bar span {
+    display: flex; align-items: center; justify-content: center;
+    color: #0b1020; font-weight: 700; min-width: 0;
+  }
+  .svg-flow { width: 100%; height: auto; margin: 8px 0 14px; }
+  .svg-flow text { font-family: var(--mono); }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 8px 0 14px; font-size: 12.5px; color: var(--muted); }
+  .legend i {
+    display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+    margin-right: 6px; vertical-align: -1px; border: 1px solid var(--border);
+  }
+  .fig {
+    background: rgba(255,255,255,.025);
+    border: 1px solid var(--border);
+    border-radius: 16px; padding: 16px 14px 12px;
+    margin: 12px 0 18px; overflow-x: auto;
+  }
+  .fig .fig-title { font-size: 13px; color: var(--muted); margin: 12px 4px 0; line-height: 1.55; }
+  .fig-chain, .fig-row { display: flex; align-items: stretch; gap: 6px; min-width: 980px; }
+  .fig-chain { align-items: center; margin: 6px 0; }
+  .fig-stack { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; }
+  .fig-merge { display: flex; flex-direction: column; justify-content: center; color: var(--muted); font-size: 20px; padding: 0 2px; }
+  .fb {
+    border-radius: 12px; padding: 10px 12px; min-width: 118px;
+    border: 1px solid var(--border); background: rgba(10,15,28,.5);
+  }
+  .fb.ice { background: rgba(124,240,196,.1); border-color: rgba(124,240,196,.38); }
+  .fb.hot { background: rgba(255,138,76,.12); border-color: rgba(255,138,76,.45); }
+  .fb.ink { background: #0a0f1c; }
+  .fb.dash { border-style: dashed; opacity: .9; }
+  .fb .k { font-weight: 750; font-size: 13.5px; }
+  .fb .d { font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+  .fb .m { font-family: var(--mono); font-size: 11px; color: #b9d4ff; margin-top: 3px; line-height: 1.4; }
+  .farr { color: var(--muted); font-size: 18px; flex: 0 0 auto; align-self: center; }
+  .zone {
+    border-radius: 16px; padding: 12px; display: flex; gap: 8px; align-items: stretch;
+  }
+  .zone.in { background: rgba(255,255,255,.03); border: 1px solid var(--border); }
+  .zone.ice { background: rgba(124,240,196,.06); border: 1px solid rgba(124,240,196,.22); }
+  .zone.hot { background: rgba(255,138,76,.07); border: 1px solid rgba(255,138,76,.25); }
+  .zone.dash {
+    background: transparent; border: 1px dashed rgba(255,200,87,.35);
+    margin-top: 10px;
+  }
+  .zone h4 { margin: 0 0 8px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+  .zone.in h4 { color: var(--muted); }
+  .zone.ice h4 { color: #7cf0c4; }
+  .zone.hot h4 { color: #ff8a4c; }
+  .zone.dash h4 { color: #ffc857; }
+  .stop {
+    writing-mode: vertical-rl; transform: rotate(180deg);
+    font-size: 10.5px; font-weight: 700; color: var(--warn);
+    letter-spacing: .08em; align-self: center; padding: 0 2px;
+  }
+  @media (max-width: 880px) {
+    .fig-chain, .fig-row { min-width: 760px; }
+  }
+  /* SVG diagrams */
+  .dg { width: 100%; height: auto; display: block; }
+  .dg text { font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif; fill: #e8eefc; }
+  .dg .t { font-size: 13px; font-weight: 700; }
+  .dg .s { font-size: 11px; fill: #9aa8c7; }
+  .dg .m { font-size: 11px; fill: #7cf0c4; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+  .dg .w { font-size: 11px; fill: #ffc857; }
+  .dg .lane { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; fill: #9aa8c7; }
+  .dg .box { fill: rgba(10,15,28,.85); stroke: rgba(148,163,184,.45); stroke-width: 1.2; }
+  .dg .ice { fill: rgba(124,240,196,.10); stroke: rgba(124,240,196,.65); stroke-width: 1.3; }
+  .dg .hot { fill: rgba(255,138,76,.13); stroke: rgba(255,138,76,.7); stroke-width: 1.3; }
+  .dg .op  { fill: rgba(110,168,255,.10); stroke: rgba(110,168,255,.6); stroke-width: 1.2; }
+  .dg .gray { fill: rgba(148,163,184,.08); stroke: rgba(148,163,184,.35); stroke-width: 1; stroke-dasharray: 4 3; }
+  .dg .zone { fill: rgba(255,255,255,.02); stroke: rgba(148,163,184,.22); stroke-width: 1; }
+  .dg .loop { fill: rgba(124,240,196,.03); stroke: rgba(124,240,196,.45); stroke-width: 1.2; stroke-dasharray: 6 4; }
+  .dg .ln { stroke: #8fa3c8; stroke-width: 1.5; fill: none; }
+  .dg .ln.g { stroke: #7cf0c4; }
+  .dg .ln.o { stroke: #ff8a4c; }
+  .dg .ln.d { stroke-dasharray: 5 4; }
+  .dg .stopline { stroke: #ffc857; stroke-width: 1.4; stroke-dasharray: 3 4; }
+  .bar { display: flex; height: 34px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); margin: 10px 0 6px; font-size: 11.5px; }
+  .bar span { display: flex; align-items: center; justify-content: center; color: #0b1020; font-weight: 750; white-space: nowrap; overflow: hidden; }
+  .bar-cap { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .qa { border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin: 10px 0; background: rgba(255,255,255,.025); }
+  .qa .q { font-weight: 750; color: #ffe0cc; margin-bottom: 6px; }
+  .qa .a { color: #d7e0f5; }
+  .qa .a p:last-child, .qa .a ul:last-child { margin-bottom: 0; }
+  .verdict { display: inline-block; font-size: 12px; font-weight: 800; padding: 2px 10px; border-radius: 999px; margin-right: 8px; border: 1px solid var(--border); }
+  .verdict.no { color: var(--danger); background: rgba(255,123,114,.12); }
+  .verdict.part { color: var(--warn); background: rgba(255,200,87,.12); }
+  .verdict.yes { color: var(--accent); background: rgba(124,240,196,.12); }
+  .src { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="badge-row">
+      <span class="badge"><strong>Chrome-10B</strong></span>
+      <span class="badge">32 kHz stereo · hop 800 · 40 Hz</span>
+      <span class="badge">S0 codec <strong>已完成</strong></span>
+      <span class="badge">S1 数据管线 <strong>已完成</strong></span>
+      <span class="badge">S2 生成链路 <strong>已完成</strong></span>
+      <span class="badge">S3 10B 预训练 <strong>进行中</strong></span>
+      <span class="badge">S4–S5 后训练 / 视频 <strong>规划</strong></span>
+    </div>
+    <h1>Chrome-10B 工程说明：整条 T2A 链路</h1>
+    <p class="subtitle">
+      本页按<strong>当前仓库代码 + 正在跑的 10B 预训练</strong>写清整条链路：数据怎么进、VAE 吃什么吐什么、
+      Qwen 取哪一层、DiT 怎么 pack 和调制、哪些能力已经有、哪些只是预留、参数和显存/耗时花在哪。
+      每个结论都标了出处：<code>chrome/</code> 源码、<code>configs/train/t2a_10b.yaml</code>、或 <code>outputs/train/t2a_10b/log.jsonl</code> 实测。
+      标「估算」的是按代码和 FLOP 推出来的，没在 GPU 上量过。
+      约定对齐 MiniMax-H3，细节见 <a href="./minimax_h3_analysis.html">H3 分析笔记</a> 与 <code>skills.md</code>。
+    </p>
+    <div class="meta-grid">
+      <div class="meta-item"><div class="k">任务</div><div class="v">S3 T2A 10.82B 预训练中</div></div>
+      <div class="meta-item"><div class="k">输入 → 输出</div><div class="v">caption → 32 kHz 立体声 4–15 s</div></div>
+      <div class="meta-item"><div class="k">参考音频 / 选择性去噪</div><div class="v">模型层预留 · 链路未接（§02）</div></div>
+      <div class="meta-item"><div class="k">文本特征</div><div class="v">Qwen3-VL-32B 第 50 层输出 · 不融合</div></div>
+      <div class="meta-item"><div class="k">10B 参数大头</div><div class="v">AdaLN 39% · FFN 39% · Attn 17%</div></div>
+      <div class="meta-item"><div class="k">训练</div><div class="v">8×H200 FSDP2 · 5.6 s/步 · 92.8 GB</div></div>
+      <div class="meta-item"><div class="k">推理显存（估算）</div><div class="v">DiT 43–65 GB + Qwen 49 GB（未命中时）</div></div>
+      <div class="meta-item"><div class="k">24h 音频</div><div class="v">约 9200 小时</div></div>
+    </div>
+  </header>
+
+  <nav class="toc">
+    <a href="#overview">01 总览</a>
+    <a href="#faq">02 关键问题速答</a>
+    <a href="#pipeline">03 总图</a>
+    <a href="#io">04 数据流转</a>
+    <a href="#contract">05 音频约定</a>
+    <a href="#data">06 数据</a>
+    <a href="#vae">07 VAE</a>
+    <a href="#stereo">08 双声道</a>
+    <a href="#text">09 文本编码</a>
+    <a href="#dit">10 DiT</a>
+    <a href="#rope">11 RoPE</a>
+    <a href="#cond">12 条件 / 参考 / 选择性去噪</a>
+    <a href="#flow">13 Flow / CFG</a>
+    <a href="#params">14 参数分布</a>
+    <a href="#cost">15 显存与耗时</a>
+    <a href="#efficiency">16 8 卡效率</a>
+    <a href="#train">17 训练框架</a>
+    <a href="#hparams">18 参数速查</a>
+    <a href="#eval">19 评测</a>
+    <a href="#run">20 命令</a>
+    <a href="#layout">21 目录 / 坑</a>
+  </nav>
+
+  <!-- ========== 01 ========== -->
+  <section class="section" id="overview">
+    <h2><span class="num">01</span>总览与阶段</h2>
+    <p>
+      Chrome-10B 是纯音频生成工程，前期只做文本生成音频（T2A）。
+      音频链路复刻 MiniMax-H3：同一套 Audio VAE、同一种单流 packed DiT、同一套 rectified flow。
+      视频放到 S5，但 AdaLN 三档和 MM-RoPE 的 h/w 轴现在就留着，后面加 VisualVAE 不改骨架。
+    </p>
+    <p>
+      <code>MiniMax-H3</code>、<code>DiffSynth-Studio</code>、<code>VR-Foley-5.5B</code> 只读。
+      本工程的代码、配置、脚本都在 <code>Chrome-10B/</code>。
+    </p>
+
+    <table>
+      <thead><tr><th>阶段</th><th>内容</th><th>状态</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>S0 基础设施</td>
+          <td>codec 复刻、H3 权重 <code>strict=True</code> 加载、encode/decode 对齐、导出往返</td>
+          <td><span class="tag g">已完成</span></td>
+        </tr>
+        <tr>
+          <td>S1 数据管线</td>
+          <td>清单 → 每源一份 Arrow 索引，整秒长度策略，多源加权混合，按 token 预算打包，可续训；VR-Foley 五个源已建索引（§06）</td>
+          <td><span class="tag g">已完成</span></td>
+        </tr>
+        <tr>
+          <td>S2 T2A 生成链路</td>
+          <td>文本编码器 + 缓存、DiT（packing / MM-RoPE / AdaLN）、flow、task / trainer（DDP / FSDP2 / HSDP）、推理、导出。骨架已按这次 10B 配方落地</td>
+          <td><span class="tag g">已完成</span></td>
+        </tr>
+        <tr>
+          <td>S3 10B 预训练</td>
+          <td><code>t2a_10b.yaml</code>：10.8B DiT、冻结 H3 VAE、Qwen3-VL-32B/50 + 文本缓存、单机 8×H200 FSDP2、<code>max_tokens=24840</code>。run 目录 <code>outputs/train/t2a_10b</code>（§03 / §16）</td>
+          <td><span class="tag o">训练中</span></td>
+        </tr>
+        <tr>
+          <td>S4 后训练</td>
+          <td>CFG 蒸馏、少步蒸馏</td>
+          <td><span class="tag b">规划</span></td>
+        </tr>
+        <tr>
+          <td>S5 视频</td>
+          <td>接 VisualVAE，同一 packed 序列联合去噪</td>
+          <td><span class="tag b">规划</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout good">
+      <div class="title">已定的决定</div>
+      <ul style="margin-bottom:0">
+        <li><strong>VAE</strong>：冻结 H3 Audio VAE，不重训；DiT 直接在它的白化 latent 上训，白化统计沿用 H3。</li>
+        <li><strong>文本</strong>：Qwen3-VL 系列，和 H3 一致。本地是 H3 的 Qwen3-VL-32B 完整权重（64 层 + 视觉塔），加载时只建前 50 层，取第 50 层的输出作为文本特征（不做多层融合）；最终规模在 1B 消融里定。</li>
+        <li><strong>能力边界</strong>：现在只有 caption → 音频。参考音频、inpainting、逐行不同噪声在 DiT 层有接口，但 layout / task / pipeline 没接，权重也没训过（§02、§12）。</li>
+        <li><strong>任务</strong>：前期只训 T2A；结构保留 VIDEO 档位和 MM-RoPE 的 h/w，S5 不改骨架。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ========== 02 ========== -->
+  <section class="section" id="faq">
+    <h2><span class="num">02</span>关键问题速答（先给结论，细节见后文）</h2>
+    <p class="dim">
+      每条先给一句判断，再给代码出处。“预留”指底层数据结构或接口已经有，但训练和推理链路没有用到；
+      “估算”指按代码和 FLOP 推出来，没有在 GPU 上量过（8 张卡都在跑 10B 训练）。
+    </p>
+
+    <div class="qa">
+      <div class="q">Q1. 现在的链路能不能“给一段参考音频再生成”（同音色、续写、风格参考）？</div>
+      <div class="a">
+        <p><span class="verdict no">不支持</span>端到端只有 caption → 音频。数据、Task、推理 Pipeline 都没有“参考音频”这个输入；
+        当前 10B 权重也从没见过干净的音频条件行。底层按 H3 留了机制，但上面三层没接：</p>
+        <table>
+          <thead><tr><th>层</th><th>位置</th><th>现状</th></tr></thead>
+          <tbody>
+            <tr><td>打包</td><td><code>dit/packing.py · Segment(target, clean)</code></td><td><span class="tag g">预留</span><code>clean=True</code> 的行 AdaLN 的 t 钉成 1.0；<code>target=False</code> 的行不进 loss</td></tr>
+            <tr><td>DiT 前向</td><td><code>dit/model.py · forward(t_rows [S])</code></td><td><span class="tag g">预留</span>每行一个 t，AdaLN 按 unique t 查表</td></tr>
+            <tr><td>损失</td><td><code>flow/objective.py · flow_loss(mask)</code></td><td><span class="tag g">预留</span>只对 <code>audio_target</code> 行求 MSE</td></tr>
+            <tr><td>Layout</td><td><code>dit/layout.py · T2ALayout</code></td><td><span class="tag d">没有</span>只产出 <code>[text | 目标 L | 目标 R]</code>，没有参考段</td></tr>
+            <tr><td>Task</td><td><code>tasks/t2a.py · t2a_flow_loss</code></td><td><span class="tag d">没有</span>对 <code>inputs.latents</code> 全部加噪，没有“这段不加噪”的分支</td></tr>
+            <tr><td>推理</td><td><code>pipeline/t2a.py · velocity()</code></td><td><span class="tag d">没有</span>所有音频行都当目标去噪</td></tr>
+            <tr><td>权重</td><td><code>outputs/train/t2a_10b</code></td><td><span class="tag d">没有</span>没训过“目标行 attend 到干净音频行”，只改推理代码也不可靠</td></tr>
+          </tbody>
+        </table>
+        <p>要支持需要五件事：新 layout、Task 只给目标段加噪、Pipeline 每步把参考行原样塞回、参考/目标配对数据、训练或微调。Euler 采样器本身不用改。改动清单见 <a href="#cond">§12</a>。</p>
+      </div>
+    </div>
+
+    <div class="qa">
+      <div class="q">Q2. 去噪能不能按条件选 token：部分行固定、部分行去噪，或者不同行用不同噪声水平？</div>
+      <div class="a">
+        <p><span class="verdict part">模型能，链路没用</span>DiT 的时间输入 <code>t_rows</code> 是逐行的 <code>[S]</code>，任意行都可以给不同的 t。
+        但现在的训练和采样都只用了最简单的形态：</p>
+        <ul>
+          <li><strong>训练</strong>：一条样本一个 σ。左右耳、所有帧共用这个 σ（<code>t2a_flow_loss</code>）。</li>
+          <li><strong>文本行</strong>：不加噪，也不被采样器更新；但 AdaLN 用的是该样本音频的 t，不是 1.0（<code>text_segment</code> 的 <code>clean=False</code>）。</li>
+          <li><strong>采样</strong>：所有样本在同一步用同一个 σ，Euler 更新全部音频行，没有 mask。</li>
+        </ul>
+        <p>所以 inpainting（固定前后补中间）、续写、diffusion forcing 那种逐帧不同 σ，都没有现成路径。机制上可行，但训练时要按同样方式构造样本。
+        还有一个代价：每行都给不同 t 的话，unique t 的个数 U 会涨到 S，每层 AdaLN 的输出 <code>[U·3, 6·4096]</code> 约 24.8k×3×24576×2 B ≈ 3.6 GB。所以 σ 要量化成少数几档。</p>
+      </div>
+    </div>
+
+    <div class="qa">
+      <div class="q">Q3. “Qwen3-VL-32B / 前 50 层”到底取的是什么？是第 50 层，还是 50 层特征融合？</div>
+      <div class="a">
+        <p><span class="verdict yes">只取第 50 层的输出</span>不融合，不拼接，不池化。</p>
+        <ul>
+          <li>只建语言模型的 <code>embed_tokens</code> + 第 1–50 个 decoder 层。第 51–64 层、最后的 <code>norm</code>、<code>lm_head</code>、视觉塔都不建，权重也不读（<code>text/qwen.py · _wanted</code>）。</li>
+          <li><code>model.norm</code> 换成 <code>Identity</code>，所以 <code>last_hidden_state</code> 就是第 50 层输出的残差流，没有归一化。</li>
+          <li>每个 token 一行，得到 <code>[L, 5120]</code>，L 是 caption 的 token 数（无 BOS/EOS，无 chat 模板）。</li>
+          <li>进 DiT 前再经过可训练的 <code>condition_proj</code>（Linear 5120→4096，20.98M）和 2 层 token refiner（只在本条 caption 内做双向 attn + SwiGLU，无 RoPE、无 AdaLN，0.436B），最后 RMSNorm。两者都随 DiT 从头训练。图见 <a href="#refiner">§09 图 4b</a>。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="qa">
+      <div class="q">Q4. 10.82B 参数主要在哪？</div>
+      <div class="a">
+        <p>AdaLN <strong>4.25B（39.2%）</strong> ≈ FFN <strong>4.23B（39.1%）</strong> &gt; Attention <strong>1.88B（17.4%）</strong> &gt; token refiner 0.44B（4.0%）&gt; 其它 0.03B。</p>
+        <p>每个 token 实际走过的稠密参数只有主干的 6.1B。AdaLN 每步只对 unique t（约 32 个）计算，算力几乎为 0，
+        但占 39% 的优化器状态、checkpoint 体积和 FSDP 通信量。见 <a href="#params">§14</a>。</p>
+      </div>
+    </div>
+
+    <div class="qa">
+      <div class="q">Q5. 训练时显存和耗时主要在哪？</div>
+      <div class="a">
+        <ul>
+          <li><strong>显存</strong>（每卡 allocated 92.8 GB）：Qwen 48.8 GB（约 53%）&gt; FSDP 分片的权重/梯度/Adam/EMA 27.1 GB &gt; 激活约 12 GB &gt; VAE 等约 3 GB。</li>
+          <li><strong>Qwen 为什么常驻</strong>：日志 <code>text_cache</code> 计数显示，每步约 29/32 条 caption 没命中缓存，要现场跑 Qwen。第一个 epoch 里每条 caption 都是第一次出现。</li>
+          <li><strong>耗时</strong>（5.6 s/步）：DiT 前向+反传+优化 3.64 s（65%）&gt; VAE 在线编码 1.35 s（24%）&gt; Qwen 在线编码 0.56 s（10%）。见 <a href="#cost">§15</a>。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="qa">
+      <div class="q">Q6. 推理时显存和耗时主要在哪？（估算）</div>
+      <div class="a">
+        <ul>
+          <li><strong>显存</strong>：DiT 以 fp32 常驻 43.3 GB；autocast 在每次前向里还会缓存一份 bf16 权重，瞬时多出约 21.6 GB（机制已用小模型实测）；
+          有新 caption 时会加载 Qwen 48.8 GB，而且不释放；VAE 0.6 GB；激活 1–3 GB。峰值约 68 GB（caption 全在缓存里）或约 117 GB（有新 caption）。</li>
+          <li><strong>耗时</strong>：稳态下 95% 以上的计算是 DiT 50 步 × CFG 双份序列。Qwen 每条 caption 只算一次（约 3 TFLOP）；VAE 解码 10 s 立体声约 1 TFLOP。
+          冷启动要读约 92 GB 权重，第一次调用往往比生成本身还慢。见 <a href="#cost">§15</a>。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="qa">
+      <div class="q">Q7. 文本行在 DiT 里做什么？推理时每步都重算吗？</div>
+      <div class="a">
+        <p>文本行和音频行在同一条序列里做双向 self-attn：同一样本内全可见，样本之间隔离。28 层都会更新文本行，只是最终层只取音频行输出。
+        推理时文本行<strong>每步都重算</strong>，因为 AdaLN 用当前 t 调制文本行，不能像 cross-attn 那样缓存 K/V。
+        refiner 的输出与 t 无关，理论上可以缓存，代码目前每步重算（计算量很小）。</p>
+      </div>
+    </div>
+
+    <div class="qa">
+      <div class="q">Q8. 能生成多长？能出单声道吗？</div>
+      <div class="a">
+        <p>训练只用 4–15 s 整秒。推理 CLI 把秒数夹到 [4, 15]（<code>train/cli.py · _prompts</code>）。<code>T2APipeline</code> 本身不限制，
+        但超过 15 s 是 RoPE t 轴外推，没训练过。输出固定 2 声道（<code>audio.channels=2</code>）；需要单声道就取 L 或 (L+R)/2 做后处理。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 03 ========== -->
+  <section class="section" id="pipeline">
+    <h2><span class="num">03</span>这次 10B 的整体链路</h2>
+    <p>
+      下面按<strong>这次正在跑的 S3 配方</strong>画：<code>configs/train/t2a_10b.yaml</code>，
+      单机 8×H200，FSDP2 分片，每卡一个 24840 行的 packed 序列。
+      视频行现在是空的；S5 接 VisualVAE 时只往 pack 里加段，DiT / trainer 骨架不动。
+    </p>
+
+    <div class="legend">
+      <span><i style="background:#7cf0c4"></i>青色 = 冻结，梯度不进</span>
+      <span><i style="background:#ff8a4c"></i>橙色 = 训练，从零初始化</span>
+      <span><i style="background:transparent;border-style:dashed"></i>虚线 = 试听 / 推理，不进训练损失</span>
+    </div>
+
+    <h3>图 1 · 训练一步：数据怎么流到 loss</h3>
+    <div class="fig">
+      <svg class="dg" viewBox="0 0 1120 380" role="img" aria-label="训练数据流">
+        <defs>
+          <marker id="ah1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8fa3c8"/></marker>
+        </defs>
+        <rect class="zone" x="10" y="30" width="652" height="104" rx="14"/>
+        <text class="lane" x="22" y="48">文本支路</text>
+        <rect class="zone" x="10" y="150" width="652" height="104" rx="14"/>
+        <text class="lane" x="22" y="168">音频支路</text>
+
+        <rect class="box" x="24" y="58" width="170" height="64" rx="10"/>
+        <text class="t" x="36" y="78">Caption</text>
+        <text class="s" x="36" y="95">H3 tokenizer · 10% 换成 " "</text>
+        <text class="m" x="36" y="112">ids [L] · L ≤ 512</text>
+
+        <rect class="ice" x="226" y="58" width="200" height="64" rx="10"/>
+        <text class="t" x="238" y="78">Qwen3-VL-32B（前 50 层）</text>
+        <text class="s" x="238" y="95">先查缓存，未命中才前向 · 冻结</text>
+        <text class="m" x="238" y="112">第 50 层输出 [L, 5120]</text>
+
+        <rect class="hot" x="458" y="58" width="190" height="64" rx="10"/>
+        <text class="t" x="470" y="78">condition_proj + refiner×2</text>
+        <text class="s" x="470" y="95">Linear 5120→4096 · 文本内双向</text>
+        <text class="m" x="470" y="112">[L, 4096]</text>
+
+        <rect class="box" x="24" y="178" width="170" height="64" rx="10"/>
+        <text class="t" x="36" y="198">立体声波形</text>
+        <text class="s" x="36" y="215">32 kHz · 4–15 s 整秒</text>
+        <text class="m" x="36" y="232">[2, 32000·s]</text>
+
+        <rect class="ice" x="226" y="178" width="200" height="64" rx="10"/>
+        <text class="t" x="238" y="198">Audio VAE 编码器</text>
+        <text class="s" x="238" y="215">L/R 当 batch=2 · 白化后验均值</text>
+        <text class="m" x="238" y="232">z0 [2, 32, 40·s]</text>
+
+        <rect class="op" x="458" y="178" width="190" height="64" rx="10"/>
+        <text class="t" x="470" y="198">加噪（rectified flow）</text>
+        <text class="s" x="470" y="215">xσ = (1−σ)·z0 + σ·ε</text>
+        <text class="m" x="470" y="232">每条一个 σ = shift3(u)</text>
+
+        <line class="stopline" x1="442" y1="34" x2="442" y2="252"/>
+        <text class="w" x="442" y="22" text-anchor="middle">stop-grad：左边不回传梯度</text>
+
+        <rect class="op" x="684" y="58" width="176" height="184" rx="12"/>
+        <text class="t" x="696" y="80">Pack 成单流序列</text>
+        <text class="s" x="696" y="100">[text | 音频 L | 音频 R]</text>
+        <text class="s" x="696" y="116">× 约 32 条，再补 pad 到 64 倍</text>
+        <text class="m" x="696" y="138">audio_patch_proj 32→4096</text>
+        <text class="m" x="696" y="156">index_add → x [S, 4096]</text>
+        <text class="s" x="696" y="176">cu_seqlens：样本之间隔离</text>
+        <text class="s" x="696" y="194">MM-RoPE (t, h, w)</text>
+        <text class="s" x="696" y="212">AdaLN 下标 = t 档×3 + tag</text>
+        <text class="w" x="696" y="232">单卡 S ≤ 24840</text>
+
+        <rect class="hot" x="892" y="58" width="212" height="184" rx="12"/>
+        <text class="t" x="904" y="80">ChromeDiT 10.82B</text>
+        <text class="s" x="904" y="102">28 block × hidden 4096</text>
+        <text class="s" x="904" y="120">32 头 × 128 · SwiGLU 12288</text>
+        <text class="s" x="904" y="138">AdaLN：每层 × 每模态（3 档）</text>
+        <text class="s" x="904" y="156">QK-RMSNorm · varlen flash-attn</text>
+        <text class="s" x="904" y="174">文本行 + 音频行同序列 self-attn</text>
+        <text class="m" x="904" y="200">激活重算 · FSDP2 分片</text>
+        <text class="m" x="904" y="218">bf16 计算 / fp32 主权重</text>
+
+        <rect class="hot" x="892" y="300" width="212" height="64" rx="10"/>
+        <text class="t" x="904" y="320">audio_out 4096→32</text>
+        <text class="s" x="904" y="337">只取音频行，文本行输出丢弃</text>
+        <text class="m" x="904" y="354">v̂ [Σ 2T, 32]</text>
+
+        <rect class="box" x="626" y="300" width="234" height="64" rx="10"/>
+        <text class="t" x="638" y="320">MSE（音频行等权）</text>
+        <text class="s" x="638" y="337">v̂ 对目标 v* = ε − z0</text>
+        <text class="m" x="638" y="354">文本行 / pad 不计</text>
+
+        <rect class="box" x="356" y="300" width="234" height="64" rx="10"/>
+        <text class="t" x="368" y="320">反传 → AdamW → EMA</text>
+        <text class="s" x="368" y="337">只更新橙色模块</text>
+        <text class="m" x="368" y="354">lr 1e-4 · clip 1.0 · EMA 0.9999</text>
+
+        <path class="ln" d="M194,90 H224" marker-end="url(#ah1)"/>
+        <path class="ln" d="M426,90 H456" marker-end="url(#ah1)"/>
+        <path class="ln" d="M648,90 H682" marker-end="url(#ah1)"/>
+        <path class="ln" d="M194,210 H224" marker-end="url(#ah1)"/>
+        <path class="ln" d="M426,210 H456" marker-end="url(#ah1)"/>
+        <path class="ln" d="M648,210 H682" marker-end="url(#ah1)"/>
+        <path class="ln" d="M860,150 H890" marker-end="url(#ah1)"/>
+        <path class="ln" d="M998,242 V298" marker-end="url(#ah1)"/>
+        <path class="ln" d="M892,332 H862" marker-end="url(#ah1)"/>
+        <path class="ln d" d="M600,242 V278 H720 V298" marker-end="url(#ah1)"/>
+        <text class="w" x="612" y="272">v* = ε − z0</text>
+        <path class="ln" d="M626,332 H592" marker-end="url(#ah1)"/>
+      </svg>
+      <p class="fig-title">
+        图 1. 青色冻结（Qwen、VAE 编码器），橙色训练（condition_proj、refiner、DiT 全部、输出头），蓝色是无参数的运算。
+        黄色虚线左边只前向，不回传梯度。训练一步只在<strong>一个</strong>噪声水平上回归速度，不跑 50 步采样，也不解码音频。
+        Chrome 没有独立的 cross-attn Connector：文本行和音频行打进同一条 packed 序列做 self-attn。
+      </p>
+    </div>
+
+    <h3>图 2 · 推理：caption 到 wav</h3>
+    <div class="fig">
+      <svg class="dg" viewBox="0 0 1120 340" role="img" aria-label="推理数据流">
+        <defs>
+          <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8fa3c8"/></marker>
+        </defs>
+        <rect class="box" x="24" y="40" width="180" height="64" rx="10"/>
+        <text class="t" x="36" y="60">captions × B</text>
+        <text class="s" x="36" y="77">外加无条件 " "（CFG 用）</text>
+        <text class="m" x="36" y="94">B ≤ infer.batch = 8</text>
+
+        <rect class="ice" x="236" y="40" width="200" height="64" rx="10"/>
+        <text class="t" x="248" y="60">文本编码（缓存 → Qwen）</text>
+        <text class="s" x="248" y="77">新 caption 才加载 Qwen 48.8 GB</text>
+        <text class="m" x="248" y="94">[L, 5120] · 每条只算一次</text>
+
+        <rect class="op" x="468" y="40" width="200" height="64" rx="10"/>
+        <text class="t" x="480" y="60">Pack 2B 条样本</text>
+        <text class="s" x="480" y="77">条件 B 条 + 无条件 B 条</text>
+        <text class="m" x="480" y="94">两份用同一份噪声</text>
+
+        <rect class="box" x="468" y="150" width="200" height="64" rx="10"/>
+        <text class="t" x="480" y="170">初始噪声 z ~ N(0, I)</text>
+        <text class="s" x="480" y="187">每条独立 seed，与分批无关</text>
+        <text class="m" x="480" y="204">[2, 32, 40·s]</text>
+
+        <rect class="loop" x="700" y="14" width="404" height="222" rx="16"/>
+        <text class="w" x="716" y="32">循环 steps 次（默认 50）· σ 从 1 走到 0 · shift = 3</text>
+
+        <rect class="hot" x="716" y="48" width="180" height="64" rx="10"/>
+        <text class="t" x="728" y="68">DiT 前向（bf16 autocast）</text>
+        <text class="s" x="728" y="85">一次前向同时出 vc 和 vu</text>
+        <text class="m" x="728" y="102">行数 = 2B × (L + 2T)</text>
+
+        <rect class="op" x="912" y="48" width="176" height="64" rx="10"/>
+        <text class="t" x="924" y="68">CFG 合成</text>
+        <text class="s" x="924" y="85">v = vu + s·(vc − vu)</text>
+        <text class="m" x="924" y="102">s = cfg_scale = 4</text>
+
+        <rect class="op" x="912" y="152" width="176" height="64" rx="10"/>
+        <text class="t" x="924" y="172">Euler 一步（η = 0）</text>
+        <text class="s" x="924" y="189">x ← x + (σ[k+1] − σ[k])·v</text>
+        <text class="m" x="924" y="206">更新全部音频行</text>
+
+        <rect class="ice" x="716" y="262" width="180" height="64" rx="10"/>
+        <text class="t" x="728" y="282">反白化 + VAE 解码器</text>
+        <text class="s" x="728" y="299">BigVGAN · 逐条解码</text>
+        <text class="m" x="728" y="316">[2, 800·T]</text>
+
+        <rect class="box" x="912" y="262" width="176" height="64" rx="10"/>
+        <text class="t" x="924" y="282">立体声 wav</text>
+        <text class="s" x="924" y="299">32 kHz · 16-bit PCM</text>
+        <text class="m" x="924" y="316">&lt;run&gt;/infer/*.wav</text>
+
+        <path class="ln" d="M204,72 H234" marker-end="url(#ah2)"/>
+        <path class="ln" d="M436,72 H466" marker-end="url(#ah2)"/>
+        <path class="ln" d="M668,72 H714" marker-end="url(#ah2)"/>
+        <path class="ln" d="M668,182 H690 V96 H714" marker-end="url(#ah2)"/>
+        <path class="ln" d="M896,80 H910" marker-end="url(#ah2)"/>
+        <path class="ln" d="M1000,112 V150" marker-end="url(#ah2)"/>
+        <path class="ln g" d="M912,184 H806 V114" marker-end="url(#ah2)"/>
+        <text class="s" x="818" y="178">下一步</text>
+        <path class="ln" d="M960,216 V246 H806 V260" marker-end="url(#ah2)"/>
+        <text class="s" x="822" y="242">最后一步之后</text>
+        <path class="ln" d="M896,294 H910" marker-end="url(#ah2)"/>
+
+        <text class="w" x="236" y="128">≈ 2 × 24.4B × L FLOP，每条一次</text>
+        <text class="w" x="24" y="150">计算量（估算，10 s · B=1 · CFG）</text>
+        <text class="s" x="24" y="170">DiT：50 步 × 约 1720 行 × 12.6 GFLOP ≈ 1.1 PFLOP</text>
+        <text class="s" x="24" y="188">Qwen：约 3 TFLOP（L≈60），一次性</text>
+        <text class="s" x="24" y="206">VAE 解码：约 1 TFLOP</text>
+        <text class="s" x="24" y="224">→ 稳态计算 &gt; 95% 在 DiT 循环</text>
+      </svg>
+      <p class="fig-title">
+        图 2. 推理只有绿色虚线框里的循环是重活：每步一次 DiT 前向，同时算条件和无条件两份（同一 packed 序列、互相看不见），
+        CFG 合成后 Euler 前进一步。Qwen 每条 caption 只算一次，VAE 解码只在最后一次。没有参考音频输入，见 §02 Q1。
+      </p>
+    </div>
+
+    <h3 id="cfg">Euler 50 · CFG 4 是什么（训练里的 3 不是 CFG）</h3>
+    <div class="callout warn">
+      <div class="title">配置里同时有三个「3 / 4 / 50」，不要混</div>
+      <p style="margin:0">
+        训练日志或 yaml 里看到的 <strong>3</strong> 是 <code>flow.shift=3.0</code>（噪声日程），
+        不是 classifier-free guidance。
+        训练阶段<strong>没有</strong> cfg_scale，只做 10% 空 caption；
+        <code>cfg_scale=4</code> 和 <code>steps=50</code> 只在 preview / infer 生效。
+      </p>
+    </div>
+    <table>
+      <thead><tr><th>你看到的数</th><th>配置键</th><th>训练</th><th>推理 / 听评</th><th>实际在干什么</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>shift = 3</strong></td>
+          <td><code>flow.shift</code></td>
+          <td>3</td>
+          <td>3（必须相同）</td>
+          <td>把均匀时间 u 拧成 σ：<code>σ = 3u / (1+2u)</code>。质量偏向中高噪声。H3 音频就是 3，视频才是 12；上一版 VR-Foley 是 5，不要混用</td>
+        </tr>
+        <tr>
+          <td><strong>cfg_drop = 0.1</strong></td>
+          <td><code>data.loader.cfg_drop</code></td>
+          <td>10% 换成 <code>" "</code></td>
+          <td>不用</td>
+          <td>让 DiT 见过无条件速度 v(x, ∅)。空条件是单个空格（token 220），和 H3 negative_prompt 一致，不是把 embedding 置零</td>
+        </tr>
+        <tr>
+          <td><strong>CFG = 4</strong></td>
+          <td><code>preview.cfg_scale</code> / <code>infer.cfg_scale</code></td>
+          <td>无（没有 guidance 缩放）</td>
+          <td><strong>4.0</strong></td>
+          <td>每步双前向：<code>v = vu + 4·(vc − vu)</code>。从零训必须在推理开 CFG；H3 发布权已经蒸馏过，官方推理才是 1.0</td>
+        </tr>
+        <tr>
+          <td><strong>Euler 50</strong></td>
+          <td><code>preview.steps</code> / <code>infer.steps</code></td>
+          <td>每步只抽 <em>一个</em> σ，做一次速度回归</td>
+          <td><strong>50</strong> 步从 σ=1 走到 0</td>
+          <td>确定 ODE（η=0），日程仍用 shift=3。H3 默认 50 步；rectified flow 轨迹接近直线，50 已经够听。S4 再蒸少步</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="grid-2">
+      <div class="card">
+        <h4>训练一步在算什么</h4>
+        <pre style="margin-bottom:0">u ~ Uniform(0,1)
+σ = 3u / (1+2u)          # shift，不是 CFG
+xσ = (1-σ)·x0 + σ·ε
+v* = ε - x0
+pred = DiT(xσ, caption 或 " ")
+loss = MSE(pred, v*)     # 一次前向，没有 50 步</pre>
+      </div>
+      <div class="card">
+        <h4>听评 / 推理 50 步在算什么</h4>
+        <pre style="margin-bottom:0">x ← ε ~ N(0,I)
+for k in 0..49:          # Euler η=0
+    vc = DiT(x, caption)
+    vu = DiT(x, " ")     # 同一 packed 序列里一起算
+    v  = vu + 4*(vc-vu)  # cfg_scale
+    x  ← x + (σ_{k+1}-σ_k)·v
+decode(unwhiten(x)) → wav</pre>
+      </div>
+    </div>
+    <p>
+      <strong>为什么定成这些值：</strong>
+      shift=3 和 50 步是跟 H3 音频日程对齐，AdaLN 训练和推理看到的 σ 表一致。
+      CFG=4 是从零训 T2A 的听评默认（上一版模型用 guidance 4.5 / 30 步；音频 flow 常见 3–5）。
+      偏小更稳、更糊，偏大更跟 prompt、更容易金属声和过饱和。这不是训出来的超参，是听评起点；S2 消融可以扫 2/3/4/5，S4 蒸馏后推理应回到 CFG=1。
+    </p>
+
+    <div class="callout orange">
+      <div class="title">这次 10B 和旧文档 16k 口径的差别</div>
+      <p style="margin:0">
+        开训前段用过 <code>max_tokens=16384</code>（约 21 条/卡、3.8 s/步、82 GB）。
+        当前配置和稳态日志都是 <code>24840</code>（约 32 条/卡、5.6 s/步、92.8 GB allocated）。
+        token/秒几乎不变，变的是<strong>一步的全局 batch</strong>（165 → 253 条）。详见 <a href="#efficiency">§16</a>。
+      </p>
+    </div>
+  </section>
+
+  <!-- ========== 04 ========== -->
+  <section class="section" id="io">
+    <h2><span class="num">04</span>模块之间的数据流转</h2>
+    <p>
+      训练一步 = 每个 rank 自己打一个包，8 个包的梯度在 FSDP2 里对一次。
+      形状按这次配方写；<code>s</code> 是整秒时长 4–15，<code>T=40·s</code>，<code>L</code> 是 caption token 数（≤512）。
+    </p>
+
+    <h3>1. 离线产物 → 在线 loader</h3>
+    <div class="fig">
+      <svg class="dg" viewBox="0 0 1120 170" role="img" aria-label="数据管线">
+        <defs>
+          <marker id="ah3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8fa3c8"/></marker>
+        </defs>
+        <rect class="zone" x="10" y="22" width="372" height="136" rx="14"/>
+        <text class="lane" x="22" y="40">离线 · 一次性（CPU，64 进程）</text>
+        <rect class="zone" x="398" y="22" width="712" height="136" rx="14"/>
+        <text class="lane" x="410" y="40">在线 · 每个 rank 一个 DataLoader（CPU worker）→ GPU</text>
+
+        <rect class="box" x="24" y="56" width="160" height="84" rx="10"/>
+        <text class="t" x="36" y="76">清单 JSONL / Parquet</text>
+        <text class="s" x="36" y="94">sources_vrfoley.yaml</text>
+        <text class="s" x="36" y="112">路径 / caption / 时长</text>
+        <text class="s" x="36" y="130">5 个源，共 3737 万行</text>
+
+        <rect class="op" x="208" y="56" width="160" height="84" rx="10"/>
+        <text class="t" x="220" y="76">Arrow 索引</text>
+        <text class="s" x="220" y="94">过滤 · 去重 · 留验证集</text>
+        <text class="s" x="220" y="112">存秒数、token 数、路径哈希</text>
+        <text class="s" x="220" y="130">mmap，进程间共享</text>
+
+        <rect class="op" x="412" y="56" width="168" height="84" rx="10"/>
+        <text class="t" x="424" y="76">MixtureBatchSampler</text>
+        <text class="s" x="424" y="94">按权重选源，贪心装包</text>
+        <text class="m" x="424" y="112">Σ(80·秒 + L) ≤ 24840</text>
+        <text class="s" x="424" y="130">超了整条进下一包，不截断</text>
+
+        <rect class="box" x="604" y="56" width="196" height="84" rx="10"/>
+        <text class="t" x="616" y="76">T2ADataset（12 worker）</text>
+        <text class="s" x="616" y="94">读窗口 → 立体声 → 32 kHz</text>
+        <text class="s" x="616" y="112">→ 整秒裁/补 → 峰值 ≤ 0.95</text>
+        <text class="m" x="616" y="130">caption → ids（10% → " "）</text>
+
+        <rect class="box" x="824" y="56" width="128" height="84" rx="10"/>
+        <text class="t" x="836" y="76">collate_t2a</text>
+        <text class="s" x="836" y="94">不等长，保持 list</text>
+        <text class="m" x="836" y="112">waves · ids</text>
+        <text class="m" x="836" y="130">batch_id</text>
+
+        <rect class="hot" x="976" y="56" width="120" height="84" rx="10"/>
+        <text class="t" x="988" y="76">prepare</text>
+        <text class="s" x="988" y="94">GPU：VAE 编码</text>
+        <text class="s" x="988" y="112">文本编码 · pack</text>
+        <text class="m" x="988" y="130">见下文 2</text>
+
+        <path class="ln" d="M184,98 H206" marker-end="url(#ah3)"/>
+        <path class="ln" d="M368,98 H410" marker-end="url(#ah3)"/>
+        <path class="ln" d="M580,98 H602" marker-end="url(#ah3)"/>
+        <path class="ln" d="M800,98 H822" marker-end="url(#ah3)"/>
+        <path class="ln" d="M952,98 H974" marker-end="url(#ah3)"/>
+      </svg>
+      <p class="fig-title">图 3. 离线只建一次索引（不存 latent，也不存波形副本）；在线每步按 token 预算装包，CPU worker 读波形和分词，GPU 端在 <code>prepare</code> 里编码。</p>
+    </div>
+
+    <h3>2. prepare：条件怎么变成 packed 序列</h3>
+    <p class="dim"><code>T2ATask.prepare</code> → <code>encode_t2a</code>（<code>chrome/tasks/t2a.py</code>）。VAE 在线编码；文本先查缓存，未命中就现场跑 Qwen 并写回缓存；最后 <code>layout.pack</code>。三步都在 <code>torch.no_grad</code> 下，不带梯度。</p>
+    <div class="split-2">
+      <div class="card">
+        <h4>音频支路</h4>
+        <pre style="margin-bottom:0">wave [2, 32000·s] float32
+  encode_waves          # 按 N 分组，禁止补零混编
+  ChromeAudioVAE.encode_audio
+    [2,N] → reshape [2,1,N] → hop pad
+    → μ [2,32,T] → (μ−mean)/std
+latent [2, 32, T] 白化后验均值
+  pack_audio            # channel-major
+rows  [2T, 32]     先整段 L，再整段 R</pre>
+      </div>
+      <div class="card">
+        <h4>文本支路</h4>
+        <pre style="margin-bottom:0">caption UTF-8
+  H3 tokenizer → ids [L]
+  10% 换成 " " (token 220) 做 CFG
+CachedTextEncoder.encode
+  memory LRU 4096 → disk safetensors
+  → miss：加载 Qwen3-VL-32B 前 50 层（首次）
+          前向，取第 50 层输出，写回 disk
+text_rows [L, 5120] bf16      # 进 DiT 之前到此为止
+  # 以下属于 DiT（可训练）
+  condition_proj 5120→4096
+  token_refiner ×2（无 AdaLN / 无 RoPE）</pre>
+      </div>
+    </div>
+
+    <div class="pack-bar">
+      <div class="seg txt">
+        <div class="who">TEXT</div>
+        <div class="meta">tag=1 · 行宽 4096<br>RoPE (t=0…L-1, h=0, w=0)<br>AdaLN 跟音频的 t</div>
+      </div>
+      <div class="seg vid" style="opacity:.45">
+        <div class="who">VIDEO 空</div>
+        <div class="meta">tag=0 预留<br>T2A 序列上 0 行<br>S5 再插入</div>
+      </div>
+      <div class="seg aud">
+        <div class="who">AUDIO L 然后 R</div>
+        <div class="meta">tag=2 · 行宽 32<br>2T 行 · 同 t、w 钉两端<br>L/R 独立噪声</div>
+      </div>
+      <div class="seg pad">
+        <div class="who">PAD</div>
+        <div class="meta">tag=-1<br>ceil(used/64)*64<br>cu_seqlens 切掉</div>
+      </div>
+    </div>
+    <p>
+      一个 rank 的包里大约 32 条样本首尾相接，样本之间靠 <code>cu_seqlens</code> 隔离注意力。
+      填充率日志 <code>fill≈0.976</code> 是相对 24840 的有效行占比，不是把某条音频砍短。
+    </p>
+
+    <h3>3. 逐步张量（一次训练 step）</h3>
+    <table>
+      <thead><tr><th>阶段</th><th>模块</th><th>进入</th><th>出去</th><th>这次 8 卡规模</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>采样</td>
+          <td><code>MixtureBatchSampler</code></td>
+          <td>5 份 Arrow 索引</td>
+          <td><code>(source, row)</code> 列表，代价 ≤ 24840</td>
+          <td>每卡 ~31.6 条；全局 ~253 条/步</td>
+        </tr>
+        <tr>
+          <td>读盘</td>
+          <td><code>T2ADataset</code></td>
+          <td>音频路径 + caption</td>
+          <td><code>wave [2, N]</code> + <code>input_ids [L]</code></td>
+          <td>N=128k–480k；均值约 8.96 s</td>
+        </tr>
+        <tr>
+          <td>拼 batch</td>
+          <td><code>collate_t2a</code></td>
+          <td>不等长样本</td>
+          <td>list of waves / ids，外加 <code>batch_id</code></td>
+          <td>data ~0.8 ms（worker 已预取）</td>
+        </tr>
+        <tr>
+          <td>编码</td>
+          <td><code>encode_waves</code> / 冻结 VAE</td>
+          <td><code>[B_len, 2, N]</code> 按长度分组</td>
+          <td><code>list of [2, 32, T]</code></td>
+          <td>VAE ~1.35 s；约 281 s 音频/卡</td>
+        </tr>
+        <tr>
+          <td>文本</td>
+          <td><code>CachedTextEncoder</code></td>
+          <td>caption ids</td>
+          <td><code>[Σ L, 5120]</code></td>
+          <td>~0.56 s：每步约 29/32 条未命中，现场跑 Qwen 再写盘</td>
+        </tr>
+        <tr>
+          <td>Pack</td>
+          <td><code>layout.pack</code> · kind=<code>t2a</code></td>
+          <td>text_lens、T、C=2</td>
+          <td><code>PackedSequence</code>：tags / RoPE / cu_seqlens</td>
+          <td>used≈24240，seq_len 对齐 64；pack ~5 ms</td>
+        </tr>
+        <tr>
+          <td>加噪</td>
+          <td><code>add_noise</code></td>
+          <td>x0、ε、<code>σ=shift(u)</code></td>
+          <td>xσ、v* = ε − x0</td>
+          <td>每条样本自己的 σ；L/R 独立高斯</td>
+        </tr>
+        <tr>
+          <td>去噪</td>
+          <td><code>ChromeDiT</code></td>
+          <td>packed 序列 + 音频行 + 文本行 + t</td>
+          <td>音频行速度 <code>[Σ 2T, 32]</code></td>
+          <td>model 前向+反传+优化 ~3.64 s</td>
+        </tr>
+        <tr>
+          <td>损失</td>
+          <td><code>flow_loss</code></td>
+          <td>pred / target / audio_target mask</td>
+          <td>标量 MSE + 按条、按源</td>
+          <td><code>loss_reduction=token</code></td>
+        </tr>
+        <tr>
+          <td>更新</td>
+          <td>FSDP2 AdamW + EMA</td>
+          <td>分片 fp32 主权重 / 梯度 / 两份 Adam</td>
+          <td>新权重；EMA 0.9999</td>
+          <td>8 卡 all-gather 按 block；root 也 reshard</td>
+        </tr>
+        <tr>
+          <td>推理</td>
+          <td><code>T2APipeline</code></td>
+          <td>caption、秒数、seed</td>
+          <td><code>wave [2, T·800]</code> 16-bit wav</td>
+          <td>Euler 50、CFG 4；条件/无条件同一序列</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>4. 谁常驻 GPU、谁只在 miss 时出现</h3>
+    <div class="grid-3">
+      <div class="card">
+        <h4>每卡常驻</h4>
+        <ul style="margin-bottom:0">
+          <li>DiT 的 1/8 分片：fp32 权重 + 梯度 + Adam 两份 + EMA ≈ 27.1 GB</li>
+          <li>冻结 Audio VAE fp32 0.6 GB（训练只走编码器，听评才解码）</li>
+          <li>当前包的激活（每个 block 只存输入，反传时重算）</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>caption 全部命中缓存</h4>
+        <ul style="margin-bottom:0">
+          <li>文本：memory LRU → 磁盘 safetensors，约 7 ms</li>
+          <li>Qwen 根本不加载</li>
+          <li>16k 干跑实测 allocated 34.8 GB</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>有 caption 未命中（这次 10B 就是这种）</h4>
+        <ul style="margin-bottom:0">
+          <li>该 rank 首次 miss 时加载 Qwen 前 50 层 48.8 GB</li>
+          <li>加载后一直占着，直到进程退出</li>
+          <li>这次 24.8k 日志 allocated 92.8 GB，其中 Qwen 约占一半</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout warn">
+      <div class="title">这次 10B 的文本缓存实际命中率只有约 10%</div>
+      <p style="margin:0">
+        日志 <code>text_cache</code> 计数（step 24020 → 24040，单 rank）：<code>encoded</code> +579、<code>memory</code> +59、<code>disk</code> +0，
+        即每步约 29 条 caption 现场过 Qwen，约 3 条命中内存。原因是开训前没有用 <code>cache_text.sh</code> 全量预填，
+        而第一个 epoch（约 4 万步）里每条 caption 都是第一次出现。磁盘缓存现在约 530 万条、约 3 TB（每条约 0.58 MB），全量 1010 万条约 5.9 TB。
+        第一个 epoch 跑完后重启训练，caption 基本都能从磁盘命中，Qwen 就不会再加载，每卡省 48.8 GB 显存和 0.56 s/步。
+      </p>
+    </div>
+  </section>
+
+  <!-- ========== 05 ========== -->
+  <section class="section" id="contract">
+    <h2><span class="num">05</span>音频约定</h2>
+    <p>
+      改动只在 <code>configs/_base_/audio_spec.yaml</code> 一处做。
+      codec、数据、DiT 都继承它；代码换算统一走 <code>chrome/spec.py</code> 的 <code>AudioSpec</code>。
+    </p>
+
+    <div class="kpi">
+      <div class="item"><div class="n">32 kHz</div><div class="l">采样率</div></div>
+      <div class="item"><div class="n">2 ch</div><div class="l">立体声</div></div>
+      <div class="item"><div class="n">800</div><div class="l">hop = 2·4·4·5·5</div></div>
+      <div class="item"><div class="n">40 Hz</div><div class="l">每耳 latent 帧率</div></div>
+      <div class="item"><div class="n">32</div><div class="l">每耳通道</div></div>
+      <div class="item"><div class="n">4–15 s</div><div class="l">训练时长</div></div>
+    </div>
+
+    <table>
+      <thead><tr><th>项</th><th>值</th><th>形状 / 公式</th></tr></thead>
+      <tbody>
+        <tr><td>波形</td><td>float32，峰值夹到 [-1, 1]</td><td><code>[..., C=2, N]</code></td></tr>
+        <tr><td>1 秒</td><td>正好 40 帧，整秒分桶不用取整</td><td>N = 32000 · s</td></tr>
+        <tr><td>latent</td><td>每声道 32 通道，连续值，不是码本</td><td><code>[..., C, 32, T]</code>，T = ceil(N / 800)</td></tr>
+        <tr><td>DiT 行</td><td>每耳每帧一行</td><td>rows = T × 2；15 s → 600 帧、1200 行</td></tr>
+        <tr><td>存盘</td><td><code>save_audio</code></td><td>16-bit PCM wav</td></tr>
+      </tbody>
+    </table>
+
+    <h3>支持的训练长度</h3>
+    <p>
+      契约写死 <code>min_seconds=4</code>、<code>max_seconds=15</code>。
+      1 秒 = 40 帧，训练片段只取整秒长度（4、5、…、15），裁还是补见 <a href="#data">§06</a> 的长度策略。
+    </p>
+    <table>
+      <thead><tr><th>秒</th><th>采样点 N</th><th>每耳帧 T</th><th>DiT 音频行</th><th>decode 波形</th></tr></thead>
+      <tbody>
+        <tr><td>4</td><td>128000</td><td>160</td><td>320</td><td>128000</td></tr>
+        <tr><td>5</td><td>160000</td><td>200</td><td>400</td><td>160000</td></tr>
+        <tr><td>8</td><td>256000</td><td>320</td><td>640</td><td>256000</td></tr>
+        <tr><td>10</td><td>320000</td><td>400</td><td>800</td><td>320000</td></tr>
+        <tr><td>15</td><td>480000</td><td>600</td><td>1200</td><td>480000</td></tr>
+      </tbody>
+    </table>
+    <p class="dim">
+      非整 hop 的波形在 encode 时右侧补零到 800 的整数倍；decode 吐出 T·800，比原长最多短一个 hop 以内的尾巴被 pad 补齐。
+      S5 若跟视频对齐，H3 会按像素帧重算 T_a（例如 10 s @24 fps 对齐到 243 帧 → T_a=405），T2A 阶段按整秒即可。
+    </p>
+
+    <h3>格式</h3>
+    <table>
+      <thead><tr><th>环节</th><th>格式</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>读入</td>
+          <td>soundfile 能解的都可（wav / flac / ogg…）；失败再 torchaudio / ffmpeg</td>
+          <td><code>read_audio</code>。计划清单还会收 mp3 / m4a / aac，以及从 mp4 抽声轨</td>
+        </tr>
+        <tr>
+          <td>内存波形</td><td>float32 <code>[C, N]</code></td><td>不是 int16，不是 interleaved numpy 默认布局</td>
+        </tr>
+        <tr>
+          <td>VAE 权重</td>
+          <td>bundle（<code>FL2VA/audio_vae</code>）或 diffusers（根目录 <code>audio_vae</code>）</td>
+          <td>导出一律写 diffusers：<code>config.json</code> + <code>diffusion_pytorch_model.safetensors</code></td>
+        </tr>
+        <tr>
+          <td>白化统计</td>
+          <td><code>latents_mean</code> / <code>latents_std</code> 写在 config.json</td>
+          <td>不进 state dict；bf16 模型也不会丢精度</td>
+        </tr>
+        <tr>
+          <td>caption</td>
+          <td>UTF-8 文本；preview 里带 <code>[MUSIC]</code> / <code>[SPEECH]</code> 与 <code>&lt;d&gt;</code> 对白包裹</td>
+          <td>用 H3 自带 tokenizer：新增 7 个 token（151669–151675），caption 只用到 <code>&lt;d&gt;</code> / <code>&lt;/d&gt;</code>，见 §09</td>
+        </tr>
+        <tr>
+          <td>写出</td><td>16-bit PCM wav</td><td><code>sf.write(..., subtype="PCM_16")</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ========== 06 ========== -->
+  <section class="section" id="data">
+    <h2><span class="num">06</span>数据处理</h2>
+    <p>
+      清单 → 每个数据源一份 Arrow 索引 → 按权重混合、按 token 预算打包的 batch → 在线读波形 → 冻结 VAE 在线编码（不存 latent）。
+      参数全在 <code>configs/data/t2a_base.yaml</code>，数据源列表在 <code>configs/data/sources_vrfoley.yaml</code>。
+      比 VR-Foley 的 <code>audio_pretrain</code> 多做的：索引一次建好、内存映射共享，不在每个进程里装整份清单；
+      所有行都能被抽到，不再先随机截 <code>max_records</code> 子集；一个包里混合时长，按 token 预算装满；续训能接上下一个 batch。
+    </p>
+
+    <h3>1. 索引（一次性，<code>scripts/data/build_index.sh</code>）</h3>
+    <ul>
+      <li>清单是 JSONL 或 Parquet，文件或目录都行。列名先用 <code>columns</code> 里配的，再退回 VR-Foley 的候选：音频 <code>path / audio / audio_filepath / wav</code>，caption <code>resp / caption / normalized_text / text</code>，时长 <code>duration / audio_duration</code>。</li>
+      <li>JSONL 按 64 MB 字节块、Parquet 按 row group，多进程扫描。每行依次检查 keep 条件、音频路径、caption、preview 排除列表、坏文件列表、时长（缺了读文件头）、长度策略、caption ≤ 512 token；每种丢弃原因都计数写进 <code>meta.json</code>。</li>
+      <li>产物 <code>outputs/data/index/&lt;source&gt;/{index.arrow, meta.json}</code>。配置和清单都没变就跳过；改 <code>weight</code> 不用重建，改了影响行内容的字段，loader 会报错，提示重建哪个源。</li>
+      <li>去重、验证集都看音频路径的 blake2b 哈希：同一路径只留一条；哈希落在每百万 <code>holdout_ppm</code>（500）以内的行留作验证，加数据不改变已有行的归属。</li>
+    </ul>
+
+    <h3>2. 长度策略：只出整秒</h3>
+    <table>
+      <thead><tr><th>原始时长</th><th><code>fit: pad</code>（默认，语音 / 音效）</th><th><code>fit: crop</code>（音乐）</th></tr></thead>
+      <tbody>
+        <tr><td>&lt; 4 s</td><td colspan="2">丢弃</td></tr>
+        <tr><td>超出整秒 &lt; 0.1 s（如 10.05）</td><td colspan="2">裁掉尾巴 → 10 s</td></tr>
+        <tr><td>6.5 s</td><td>补 0.5 s 静音 → 7 s，保留结尾</td><td>随机取 6 s 窗口</td></tr>
+        <tr><td>&gt; 15.1 s</td><td colspan="2"><code>long: drop</code>（默认，整段 caption 对不上片段）或 <code>long: crop</code>（随机 15 s 窗口）</td></tr>
+      </tbody>
+    </table>
+    <p class="dim">整秒长度让一条样本的音频行数正好是 80 × 秒，打包代价不用估。</p>
+
+    <h3>3. 采样与打包（<code>MixtureBatchSampler</code>）</h3>
+    <div class="callout">
+      <div class="title"><code>max_tokens</code> 是单卡预算，不是全局 batch</div>
+      <p style="margin:0">
+        每个 rank 各自打一个包，上限 <code>data.loader.max_tokens</code>（这次 10B 是 <strong>24840</strong>）。
+        8 卡一步的全局规模是 8 个独立的包：大约 <code>8 × 24840</code> 行、253 条音频，不是「8 卡共享一个预算」。
+        日志里的 <code>clips/rank</code> 是每卡条数，<code>fill</code> 是本卡 24840 里有效行的占比。
+      </p>
+    </div>
+    <ul>
+      <li>每抽一条，先按 weight 选源，再取该源 shard 的下一行。shard = 本 rank 在按 (seed, 源名, 源 epoch) 打乱的排列上取 <code>[rank::world]</code>，同一 epoch 内各 rank 不重叠，小源只是更快进入下一个 epoch。</li>
+      <li>每条代价 = <code>80 × 秒 + caption token 数</code>（80 = 每秒 40 帧 × 左右耳）。贪心往当前包里塞，累加到 <code>max_tokens</code> 就封包。</li>
+      <li><strong>临界超限不截断。</strong> 再塞下一条会超过 <code>max_tokens</code>（这次 24840；或条数到 <code>max_samples=64</code>），这条完整放进 <code>_carry</code>，下一包原样接着用。当前包带着不满的 token 去训。日志 <code>fill≈0.976</code> 就是经常差最后一条装不满；差的那截只是整包再补到 64 的倍数，不是把某条音频砍短。</li>
+      <li>单条自己的代价已经大于 <code>max_tokens</code> 时，sampler 启动直接报错，不会默默截断。当前上限 caption 512、最长 15 s，代价最多约 <code>80×15+512=1712</code>，远小于 16k。</li>
+      <li>一个包里时长混合（4–15 s）。波形保持各自长度；DiT 按样本切 <code>cu_seqlens</code>，样本之间互不看见。VAE 只拼等长片段再编码，见下方警告框。</li>
+      <li>续训：训练器存 <code>sampler.state_dict(batch["batch_id"])</code>，恢复后从下一个 batch 接着出；取窗位置和 caption dropout 由每条样本的种子决定，也一样。某个源重建过索引，只有它从下一个 epoch 重来。中途改 <code>max_tokens</code> 会改变封包切分，续训对不齐当前 sampler，应另开 run。</li>
+    </ul>
+    <p>
+      按 token 预算而不是固定条数，是为了把每步的算力和显存钉在序列长度上。
+      4 s 和 15 s 对 DiT 的代价差约 4 倍；固定 <code>bs=N</code> 要么按最长 pad 空算，要么只能抽同长度。
+      这次 10B 用 24.8k 打包：每卡大约 32 条、填充率 0.976，步时和显存都稳。16k 干跑时是 21 条 / 0.97。
+    </p>
+    <table>
+      <thead><tr><th>口径</th><th>这次 8 卡 × 24.8k</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>每卡 micro-batch</td><td>24840 token，约 31.6 条</td><td><code>max_tokens</code> / <code>max_samples=64</code>（条数上限几乎碰不到）</td></tr>
+        <tr><td>一步全局</td><td>约 253 条，<code>grad_accum=1</code></td><td>8 个独立包相加，不是 8 卡分一个包</td></tr>
+        <tr><td>10B 显存（这次预训练）</td><td>allocated 92.8 GB / nvidia-smi 101–122 GB</td><td>见 §15。其中 Qwen 约 48.8 GB（缓存命中率约 10%，各 rank 都已加载）；16k 全命中缓存时只有 ~35 GB</td></tr>
+        <tr><td>再加大 <code>max_tokens</code></td><td>当前不要加</td><td>token/秒几乎不变，只加大 batch 和显存。Qwen 常驻时余量只剩 16–38 GB</td></tr>
+      </tbody>
+    </table>
+
+    <h3>4. 读取（DataLoader worker）</h3>
+    <ol class="step-list" style="list-style:none;padding-left:0">
+      <li style="position:relative;padding:10px 12px 10px 48px;margin:8px 0;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.02)">
+        <strong>读文件</strong>：要裁的只解码需要的窗口（<code>soundfile</code> seek，不行再用 <code>torchaudio.load(frame_offset=…)</code>）；
+        其余整段读，soundfile 失败再 torchaudio。解码失败的路径追加进 <code>outputs/data/bad_audio.txt</code>（加文件锁），换同源随机一条。
+      </li>
+      <li style="position:relative;padding:10px 12px 10px 48px;margin:8px 0;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.02)">
+        <strong>折成立体声</strong>：<code>to_stereo</code>，见 <a href="#stereo">§08</a>。
+      </li>
+      <li style="position:relative;padding:10px 12px 10px 48px;margin:8px 0;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.02)">
+        <strong>重采样</strong>：到 32000，sinc 核按采样率对缓存（和 <code>torchaudio.functional.resample</code> 差 &lt; 1e-4）。
+        16 kHz 语音库升到 32 kHz 后 8 kHz 以上没有能量，配比过大会拉低高频。
+      </li>
+      <li style="position:relative;padding:10px 12px 10px 48px;margin:8px 0;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.02)">
+        <strong>长度与峰值</strong>：裁或补到整秒；峰值超过 0.95 才整体缩小，更小的不放大（同 VR-Foley，<code>data.peak</code>）。
+      </li>
+      <li style="position:relative;padding:10px 12px 10px 48px;margin:8px 0;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.02)">
+        <strong>caption</strong>：H3 tokenizer 编码；10% 换成 <code>" "</code>（token 220）做 CFG。
+      </li>
+    </ol>
+
+    <div class="callout warn">
+      <div class="title">VAE 批量编码只拼等长片段</div>
+      <p style="margin:0">
+        实测把短片段补零到长片段再一起编码，被补的片段最后约 10 帧 latent 会变（最大差 1.08），编码器的感受野伸进了补零区。
+        所以 batch 里 <code>waves</code> 是长度各异的列表，<code>encode_waves</code> 按长度分组编码、按原顺序返回。
+        在线编码 15 s 立体声 fp32 约 148 ms。这次 10B 24.8k 包（约 281 s 音频/卡）VAE 约 1.35 s，占步时 24%（§16）。
+      </p>
+    </div>
+
+<pre>from chrome.data.batch import encode_waves
+from chrome.data.loader import build_train_loader
+
+loader, sampler = build_train_loader(cfg, rank, world_size, state=ckpt.get("data"))
+for batch in loader:
+    latents = encode_waves(vae, batch["waves"], device)   # list of [2, 32, 40·s]
+    ids = batch["input_ids"]                              # list of caption token ids
+    ...
+    ckpt["data"] = sampler.state_dict(batch["batch_id"])</pre>
+    <p class="dim">
+      验证集：每源取哈希最小的 256 条验证行，取中间窗口、不做 dropout、不跨源打包（<code>build_val_loader</code>）。
+      加数据源：在 <code>data.sources</code> 加一项，再 <code>bash scripts/data/build_index.sh data.only=[新源名]</code>。
+    </p>
+
+    <h3>VR-Foley 五个源的实测（2026-10-12）</h3>
+    <table>
+      <thead><tr><th>源</th><th>任务</th><th>清单行</th><th>训练行</th><th>小时</th><th>caption token p50 / p95</th><th>权重</th><th>按时长占比</th></tr></thead>
+      <tbody>
+        <tr><td>music</td><td>音乐</td><td>4.32M</td><td>4.30M</td><td>11,936</td><td>151 / 167</td><td>0.9</td><td>9.9%</td></tr>
+        <tr><td>freesound</td><td>音效</td><td>0.42M</td><td>0.42M</td><td>1,177</td><td>90 / 160</td><td>0.35</td><td>3.9%</td></tr>
+        <tr><td>audioset</td><td>音效</td><td>0.49M</td><td>0.49M</td><td>1,356</td><td>141 / 222</td><td>0.35</td><td>3.9%</td></tr>
+        <tr><td>hifitts2</td><td>英文语音</td><td>11.31M</td><td>8.65M</td><td>23,649</td><td>41 / 61</td><td>3.5</td><td>38.1%</td></tr>
+        <tr><td>zhizhou</td><td>中文语音</td><td>20.83M</td><td>7.01M</td><td>15,577</td><td>39 / 59</td><td>5.0</td><td><strong>44.2%</strong></td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li>权重沿用 VR-Foley 的 <code>max_records</code> 比例。zhizhou 全是 16 kHz，却占 44% 时长，S2 定配比时要重点看。</li>
+      <li>主要丢弃：zhizhou 的 keep 条件（<code>bw_flag=ok</code>、<code>cer≤0.3</code>）866 万条、短于 4 s 377 万条；HiFiTTS-2 超过 15 s 172 万条、短于 4 s 93 万条。</li>
+      <li>语音 88% 的片段是补齐的（平均约 0.5 s 静音）；音乐、FreeSound、AudioSet 99% 是 10 s。</li>
+      <li>索引共 9.3 GB，64 进程 6 分钟建完，瓶颈是 caption 分词。loader 单进程 12 worker：32 batch/s、665 条/s，包填充率 96%，各源占比和权重一致。</li>
+    </ul>
+
+    <h3>Preview 清单</h3>
+    <p>
+      <code>configs/eval/preview_set.json</code> 共 18 条，从 VR-Foley 复制：
+      音乐 3、英文语音 2、中文语音 9（普通话男女各年龄段、四川话、粤语、台湾腔、耳语、唱歌）、FreeSound 2、AudioSet 2（鸟叫、雨声）。
+      建索引时排除这些路径。对齐检查只用其中 8 条，见 <code>configs/vae/h3_frozen.yaml</code> 的 <code>clip_labels</code>。
+    </p>
+  </section>
+
+  <!-- ========== 07 ========== -->
+  <section class="section" id="vae">
+    <h2><span class="num">07</span>VAE：输入、输出、结构、Decoder</h2>
+    <p>
+      <code>chrome/codec/ChromeAudioVAE</code> 复刻 H3 Audio VAE。
+      state dict 键名一致，原始权重 <code>strict=True</code> 直接加载，没有改名钩子。
+      结构：<strong>DAC 编码器 → 因果注意力瓶颈 → 对角高斯 → BigVGAN 解码器</strong>。
+    </p>
+
+    <div class="callout orange">
+      <div class="title">网络本身是单声道</div>
+      <p style="margin:0">
+        <code>in_channels=1</code>。立体声折进 batch 维：<code>[..., C, N] → [-1, 1, N]</code>。
+        左右共享全部权重，codec <strong>内部不混合</strong>左右。
+        入口 <code>encode_audio</code> / <code>decode_audio</code> 负责折、拆、白化。
+      </p>
+    </div>
+
+    <h3>接口（已实现）</h3>
+<pre>from chrome.codec import load_h3_audio_vae
+
+vae = load_h3_audio_vae(paths.h3_audio_vae, device="cuda")
+
+# 推理 / DiT 用：只要白化后的后验均值，不采样、不带梯度
+latent = vae.encode_audio(wave)      # [..., C, N] → [..., C, 32, ceil(N/800)] float32
+wave   = vae.decode_audio(latent)    # [..., C, 32, T] → [..., C, T·800]
+
+# 训练 VAE 用
+recon, posterior = vae.forward(audio, sample=True)   # posterior.logs 是 log σ
+# encode_posterior → DiagonalGaussian(mean, logs)
+</pre>
+    <table>
+      <thead><tr><th>函数</th><th>输入</th><th>输出</th><th>备注</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>preprocess</code></td>
+          <td><code>[B, 1, N]</code></td>
+          <td>右侧补零到 hop 整数倍</td>
+          <td>只 pad 右边</td>
+        </tr>
+        <tr>
+          <td><code>encode</code></td>
+          <td>hop 对齐的单声道 <code>[B, 1, N]</code></td>
+          <td>原始后验均值 <code>[B, 32, T]</code></td>
+          <td>未白化</td>
+        </tr>
+        <tr>
+          <td><code>encode_posterior</code></td>
+          <td>同上</td>
+          <td><code>DiagonalGaussian</code></td>
+          <td>q(z|x)=N(μ, exp(logs)²)，逐通道逐帧独立</td>
+        </tr>
+        <tr>
+          <td><code>encode_audio</code></td>
+          <td><code>[..., C, N]</code></td>
+          <td>白化 μ <code>[..., C, 32, T]</code></td>
+          <td><code>@torch.no_grad</code>；DiT 只吃这个</td>
+        </tr>
+        <tr>
+          <td><code>decode</code></td>
+          <td>未白化 z <code>[B, 32, T]</code></td>
+          <td>单声道 <code>[B, 1, T·800]</code></td>
+          <td>dec_in_proj 32→2048 再 BigVGAN</td>
+        </tr>
+        <tr>
+          <td><code>decode_audio</code></td>
+          <td>白化 latent <code>[..., C, 32, T]</code></td>
+          <td><code>[..., C, T·800]</code></td>
+          <td>先反白化再 decode</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>结构与参数（对齐实测 151.321M）</h3>
+    <table>
+      <thead><tr><th>部分</th><th>结构</th><th>参数</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>encoder</td>
+          <td>Snake + 膨胀残差；下采样 <code>[2,4,4,5,5]</code>；宽 64 → 2048</td>
+          <td>73.715M</td>
+        </tr>
+        <tr>
+          <td>pre_block</td>
+          <td><code>AttnProjection</code>：8 头因果注意力，多头输出取平均，256 池化到 32；外加 GeGLU</td>
+          <td>12.668M</td>
+        </tr>
+        <tr>
+          <td>heads</td>
+          <td><code>mean_proj</code> / <code>logs_proj</code> 都是 <code>Conv1d(32,32,1)</code>；<code>dec_in_proj</code> 32→2048</td>
+          <td>0.07M</td>
+        </tr>
+        <tr>
+          <td>decoder</td>
+          <td>BigVGAN，见下</td>
+          <td>64.869M</td>
+        </tr>
+        <tr>
+          <td>合计</td>
+          <td></td>
+          <td><strong>151.321M</strong></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h4>Encoder 下采样</h4>
+<pre>波形 [B, 1, N]
+  WNConv1d 7×7, 1→64
+  EncoderBlock ×5，通道倍增，stride = 2, 4, 4, 5, 5
+    ResidualUnit dilation 1 / 3 / 9（核 7）+ Snake
+  Snake + WNConv1d → 2048
+→ [B, 2048, N/800]
+</pre>
+
+    <h4>注意力瓶颈</h4>
+    <p>
+      2048 必须能被 32 整除，bottleneck=32。
+      QKV 先扩到 max(in,out)=2048，8 头、head_dim=256。
+      变窄时把头维平均，再用 <code>adaptive_avg_pool1d</code> 收到 32，再 Linear 投影。
+      旁路是 <code>Linear(2048→32)</code>，后面接 GeGLU MLP（ratio=2）。
+      注意力<strong>因果</strong>：当前帧看不到未来。
+    </p>
+
+    <h4 id="decoder">Decoder（BigVGAN）</h4>
+    <table>
+      <thead><tr><th>项</th><th>值</th></tr></thead>
+      <tbody>
+        <tr><td>入口</td><td><code>dec_in_proj</code>：32 → 2048，再 <code>conv_pre</code> 7×7 → 1024</td></tr>
+        <tr><td>上采样率</td><td><code>[5,5,2,2,2,2,2]</code>，积 800，与 encoder hop 对齐</td></tr>
+        <tr><td>转置核</td><td><code>[9,9,4,4,4,4,4]</code>。bundle 的 metadata 不带核长，按采样率查表：32000 用这组</td></tr>
+        <tr><td>AMP 残差</td><td>每级 3 个核 3/7/11，膨胀 1/3/5；抗混叠 SnakeBeta（logscale）</td></tr>
+        <tr><td>末端</td><td><code>conv_post</code> 无 bias；<strong>clamp [-1,1]</strong>，不用 tanh</td></tr>
+        <tr><td>输出</td><td>单声道 <code>[B, 1, T·800]</code>。batch=2 就是左右耳</td></tr>
+      </tbody>
+    </table>
+    <p>
+      权重归一是老式 <code>weight_g</code> / <code>weight_v</code>，前向 <code>torch._weight_norm</code> 合成。
+      官方 <code>init_weights</code> 对参数化后的 WN 卷积实际不起作用；这里按 docstring 本意：v ~ TruncNormal(0.02)，g = 1。
+    </p>
+
+    <h3>白化</h3>
+<pre>DiT 看到的：  z = (μ − mean) / std     # 每通道一对，左右共用
+Decoder 吃：  μ = z * std + mean        # LatentStats，float32，不进 state dict
+</pre>
+    <p>
+      统计来自 H3 <code>config.json</code> 的 <code>latents_mean</code> / <code>latents_std</code>。
+      8 条 preview（各 10 s）上，白化后每通道 std 只有 0.42–0.56，不是 1。
+      H3 给的 <code>latents_std</code> 大约是这批实测值的 2 倍，DiT 看到的幅度只有噪声的一半左右，相当于把信噪比调度整体挪了一截。
+      VAE 冻结、统计沿用 H3，这个偏移在 S2 调 shift 时一起看。
+    </p>
+
+    <h3>后验有多「VAE」</h3>
+    <p>
+      实测 σ 中位数约 0.005，每维 KL 约 5.3。H3 VAE 实际接近普通自编码器，KL 权重很小。
+      <strong>DiT 只吃后验均值，不采样。</strong>
+      训练 VAE 时 <code>forward(..., sample=True)</code> 才会从对角高斯抽。
+    </p>
+
+    <h3>权重两种布局</h3>
+    <table>
+      <thead><tr><th></th><th>Bundle</th><th>Diffusers</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>路径</td>
+          <td><code>FL2VA/audio_vae</code>（config.json 指向 yaml / metadata / safetensors）</td>
+          <td>根目录 <code>audio_vae</code>（一个 config.json + weights）</td>
+        </tr>
+        <tr>
+          <td>核长</td>
+          <td>metadata 没有，按采样率查表</td>
+          <td>写在 config 里</td>
+        </tr>
+        <tr>
+          <td>导出</td>
+          <td>—</td>
+          <td>本仓库一律写这个，并多记 <code>attn_proj</code> / <code>snake_logscale</code> / <code>use_tanh_at_final</code> / <code>use_bias_at_final</code></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="dim">两种格式权重逐位相同。加载都走 <code>load_h3_audio_vae</code>。</p>
+  </section>
+
+  <!-- ========== 08 ========== -->
+  <section class="section" id="stereo">
+    <h2><span class="num">08</span>双声道怎么处理</h2>
+    <p>分三层：读文件、VAE、DiT。不要混。</p>
+
+    <h3>1. 读文件：<code>to_stereo</code></h3>
+<pre># chrome/data/audio_io.py
+C == 1  →  repeat → [2, N]          # 左右逐点相同
+C == 2  →  原样
+C  > 2  →  L = ch0 + 0.7071·ch2
+            R = ch1 + (0.7071·ch2 若只多 1 路，否则 extra[1:].mean())
+</pre>
+    <p>
+      单声道是复制，不是 mid/side，也不是 ffmpeg 的 downmix。
+      多于两声道时，额外声道按 0.7071 折进左右（与 VR-Foley 相同）。
+    </p>
+
+    <h3>2. VAE：L/R 完全不混合</h3>
+<pre>wave [2, N]
+  reshape → [2, 1, N]          # batch=2
+  pad hop → encode → μ [2, 32, T]
+  同一套 mean/std 白化
+→ latent [2, 32, T]
+
+decode 反向：unwhiten → [2, 32, T] 当 batch=2 → BigVGAN → [2, 1, T·800] → [2, T·800]
+</pre>
+    <ul>
+      <li>输入 L≡R ⇒ μ_L ≡ μ_R（确定性 encode，误差为 0，对齐检查已过）。</li>
+      <li>输入 L≠R ⇒ μ_L ≠ μ_R。没有 (L+R)/2，没有跨耳卷积。</li>
+      <li>白化统计是「编码器输出空间」的 32 对，<strong>不是</strong>左右各一套。</li>
+      <li>批量 <code>[B, 2, N]</code> 与逐条编码逐位相等。</li>
+    </ul>
+
+    <h3>3. DiT：L/R 会互相看见（已实现，跟 H3）</h3>
+    <p>
+      pack 是 <strong>channel-major</strong>：先整段左耳 T 行，再整段右耳 T 行。
+      不是按帧交错 L0 R0 L1 R1。
+    </p>
+<pre># pack_audio([2, 32, T])
+rows = latent.permute(0, 2, 1).reshape(2 * T, 32)
+# rows[0:T]     = L
+# rows[T:2T]    = R
+
+# unpack 回来仍是 [2, 32, T]
+</pre>
+    <table>
+      <thead><tr><th></th><th>左耳</th><th>右耳</th></tr></thead>
+      <tbody>
+        <tr><td>token_tag</td><td>AUDIO=2</td><td>AUDIO=2（AdaLN 不区分左右）</td></tr>
+        <tr><td>RoPE t</td><td><code>text_len + k</code></td><td>同一套（同步，不是错开半拍）</td></tr>
+        <tr><td>RoPE h</td><td>0</td><td>0</td></tr>
+        <tr><td>RoPE w</td><td>画布最左 <code>w_grid[0]</code>（随画幅变，见下）</td><td>画布最右 <code>w_grid[-1]</code>（随画幅变）</td></tr>
+        <tr><td>噪声</td><td colspan="2"><code>randn([2,32,T])</code> 整块抽，L/R 独立高斯，不是 copy</td></tr>
+      </tbody>
+    </table>
+    <div class="callout good">
+      <div class="title">真立体声靠什么</div>
+      <p style="margin:0">
+        VAE 保住分叉；DiT 用独立噪声 + 不同 w + 满注意力。
+        没有「把左复制到右」的后处理。
+        听感是否分得开，取决于语料里 L≠R 的比例，以及画面 / prompt 有没有左右线索。
+        AdaLN 左右共用同一档 audio 系数。
+      </p>
+    </div>
+
+    <h3>T2A 没有画面时，w 钉在哪</h3>
+    <p>
+      T2A 阶段没有视频 token，但仍走同一套 3D MM-RoPE。
+      左右耳必须有不同的 w，否则都挤在 (t, 0, 0) 和文本叠在一起。
+      暂定：用 H3 默认画布 16:9 · 1344×768 的两端（<code>w_L≈−5.17</code>、<code>w_R≈36.16</code>，<code>_INTERP=32</code>）。
+      这一条<strong>未定版</strong>，S5 前要重新决定，原因见下。
+    </p>
+
+    <div class="callout warn">
+      <div class="title">待定风险：H3 把左右耳的 w 绑在视频画幅上</div>
+      <p>
+        H3 的 <code>_audio_w_axis</code> 直接取视频网格 <code>w_grid</code> 的首尾两列，而 <code>w_grid</code> 按 sqrt-area 归一，
+        画幅一变，两耳的 w 和间距都变（实测）：
+      </p>
+      <table>
+        <thead><tr><th>画幅</th><th>w_L</th><th>w_R</th><th>间距</th></tr></thead>
+        <tbody>
+          <tr><td>16:9 · 1344×768（H3 默认）</td><td>−5.17</td><td>36.16</td><td>41.3</td></tr>
+          <tr><td>1:1 · 1024×1024</td><td>0.00</td><td>31.00</td><td>31.0</td></tr>
+          <tr><td>9:16 · 768×1344</td><td>3.91</td><td>27.09</td><td>23.2</td></tr>
+        </tbody>
+      </table>
+      <p>
+        <strong>绑定的出发点</strong>（推测，H3 没有公开消融）：视频 patch 和音频共用同一条 w 尺。
+        左耳离画面左侧的 patch 近、离右侧远，RoPE 的相对位置会让左耳行更容易关注左半屏，
+        给「车从左边进 → 左声道先响」这类声像对应提供一个先验，不用另外发明音频空间轴。
+      </p>
+      <p>
+        <strong>代价</strong>：
+        ① T2A 没有画布，只能硬选一组值；
+        ② S5 遇到多种画幅时，左右耳间距在 23–41 之间变，T2A 学到的立体声位置信号会偏移；
+        ③ 文本固定在 w=0，16:9 下离左耳 5.17、离右耳 36.16，左右不对称，单声道复制（L=R）的样本要靠模型自己抹平。
+      </p>
+      <p style="margin:0">
+        S5 前要在三条里选一条：
+        保持 H3 原样，T2A 固定 16:9；
+        保持绑定，但 T2A 按 S5 计划的画幅集合随机抽 w；
+        或者解绑，音频 w 固定成一组与画幅无关的值。
+        RoPE 的 w 只是软偏置，不是 mask（见 §11），所以绑定的收益要等有视频数据时才能验证。
+      </p>
+    </div>
+  </section>
+
+  <!-- ========== 09 ========== -->
+  <section class="section" id="text">
+    <h2><span class="num">09</span>文本编码器（已实现，<code>chrome/text/</code>）</h2>
+    <p>
+      和 H3 一致，用 Qwen3-VL-32B 的语言模型。“/50”的意思是<strong>截断到前 50 层，取第 50 层的输出</strong>：
+      只有这一处特征，没有多层融合。每个 token 一行 <code>[L, 5120]</code>，不做池化。
+    </p>
+
+    <h3>图 4 · Qwen3-VL-32B 只建前 50 层，取第 50 层的输出</h3>
+    <div class="fig">
+      <svg class="dg" viewBox="0 0 1120 260" role="img" aria-label="Qwen 截断示意">
+        <defs>
+          <marker id="ah4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8fa3c8"/></marker>
+          <pattern id="kp4" x="266" y="0" width="10" height="56" patternUnits="userSpaceOnUse">
+            <rect x="0.5" y="0" width="7.5" height="56" rx="2" fill="rgba(124,240,196,.30)" stroke="rgba(124,240,196,.85)" stroke-width=".6"/>
+          </pattern>
+          <pattern id="dp4" x="266" y="0" width="10" height="56" patternUnits="userSpaceOnUse">
+            <rect x="0.5" y="0" width="7.5" height="56" rx="2" fill="rgba(148,163,184,.08)" stroke="rgba(148,163,184,.4)" stroke-width=".6" stroke-dasharray="2 2"/>
+          </pattern>
+        </defs>
+        <rect class="box" x="20" y="70" width="110" height="56" rx="10"/>
+        <text class="t" x="32" y="92">caption ids</text>
+        <text class="s" x="32" y="112">[L] · 无 BOS/EOS</text>
+
+        <rect class="ice" x="150" y="70" width="100" height="56" rx="10"/>
+        <text class="t" x="162" y="92">embed_tokens</text>
+        <text class="m" x="162" y="112">151936×5120</text>
+
+        <rect x="266" y="70" width="500" height="56" fill="url(#kp4)"/>
+        <rect x="766" y="70" width="140" height="56" fill="url(#dp4)"/>
+        <text class="s" x="266" y="62">第 1 层</text>
+        <text class="w" x="762" y="62" text-anchor="end">第 50 层</text>
+        <text class="s" x="772" y="62">51–64 层：不建</text>
+        <text class="s" x="516" y="146" text-anchor="middle">每层：因果 self-attn + SwiGLU，宽 5120；纯文本时 MRoPE 三轴相同，等于 1D RoPE</text>
+
+        <rect class="gray" x="924" y="70" width="80" height="56" rx="10"/>
+        <text class="t" x="936" y="92">norm</text>
+        <text class="s" x="936" y="112">→ Identity</text>
+        <rect class="gray" x="1018" y="70" width="88" height="56" rx="10"/>
+        <text class="t" x="1030" y="92">lm_head</text>
+        <text class="s" x="1030" y="112">不建</text>
+
+        <path class="ln" d="M130,98 H148" marker-end="url(#ah4)"/>
+        <path class="ln" d="M250,98 H264" marker-end="url(#ah4)"/>
+        <path class="ln g" d="M766,128 V176" marker-end="url(#ah4)"/>
+
+        <rect class="op" x="636" y="178" width="262" height="60" rx="10"/>
+        <text class="t" x="648" y="199">第 50 层输出 = last_hidden_state</text>
+        <text class="m" x="648" y="218">[L, 5120] bf16 · 没有归一化</text>
+
+        <rect class="hot" x="926" y="178" width="180" height="60" rx="10"/>
+        <text class="t" x="938" y="199">进 DiT（可训练）</text>
+        <text class="m" x="938" y="218">proj+refiner→[L,4096]</text>
+        <path class="ln" d="M898,208 H924" marker-end="url(#ah4)"/>
+
+        <rect class="zone" x="20" y="170" width="590" height="74" rx="12"/>
+        <text class="w" x="36" y="192">✗ 不是 50 层特征加权融合，也不是多层拼接</text>
+        <text class="w" x="36" y="212">✗ 不是池化成一个句向量：每个 token 一行，L 行进 DiT</text>
+        <text class="s" x="36" y="232">✓ 与 DiffSynth MiniMaxH3TextEncoder（H3 默认，num_retained_layers=50）同一口径</text>
+      </svg>
+      <p class="fig-title">
+        图 4. 实线青色是加载并参与前向的 50 层，灰色虚线是不存在的部分。<code>model.norm</code> 换成 Identity 后，
+        <code>last_hidden_state</code> 就是第 50 层输出的残差流。代码见 <code>chrome/text/qwen.py</code>：先在 meta device 上建 50 层的模型，
+        再只从 safetensors 读 <code>model.language_model.embed_tokens.*</code> 和 <code>layers.0–49.*</code>（<code>_wanted</code>）。
+      </p>
+    </div>
+
+    <h3>caption 从文本到 DiT 输入的每一步</h3>
+    <table>
+      <thead><tr><th>步骤</th><th>做法</th><th>出处</th></tr></thead>
+      <tbody>
+        <tr><td>分词</td><td>H3 tokenizer，<code>add_special_tokens=False</code>：没有 BOS/EOS，没有 chat 模板和 system prompt，caption 原文直接切</td><td class="src">data/captions.py</td></tr>
+        <tr><td>长度</td><td>≤ 512 token，超长的在建索引时丢弃。各源 p50 在 39–151 之间，按混合权重的均值约 56</td><td class="src">data.max_text_tokens</td></tr>
+        <tr><td>无条件</td><td>单个空格 <code>" "</code> → 1 个 token（id 220），和正常 caption 走同一个编码器</td><td class="src">NULL_CAPTION</td></tr>
+        <tr><td>批处理</td><td>按长度排序，每批最多 32768 个补齐后的 token；右侧补 <code>pad_id=151643</code>。因果注意力保证真实 token 看不到右边的 pad，结果按真实长度切回</td><td class="src">text/qwen.py · encode</td></tr>
+        <tr><td>位置 / 注意力</td><td>默认 <code>arange</code> 位置，SDPA 因果注意力</td><td class="src">text/qwen.py</td></tr>
+        <tr><td>输出</td><td>第 50 层输出 <code>[L_i, 5120]</code> bf16，冻结（<code>eval</code> + <code>requires_grad_(False)</code> + <code>no_grad</code>）</td><td class="src">text/qwen.py</td></tr>
+        <tr><td>缓存</td><td>键 = blake2b（编码器指纹 + token ids）。指纹包含路径、层数、dtype，改 <code>num_layers</code> 会自动换目录，不会读到旧特征</td><td class="src">text/cache.py</td></tr>
+        <tr><td>进 DiT 前</td><td>可选 <code>text_norm</code>（默认 none）→ <code>condition_proj</code> Linear(5120→4096, 带 bias) → refiner ×2（RMSNorm → 文本内双向 attn，无 RoPE → RMSNorm → SwiGLU）→ RMSNorm。全部可训练，详见<a href="#refiner">下文</a></td><td class="src">dit/model.py · layers.py</td></tr>
+        <tr><td>在 DiT 里</td><td>scatter 到 packed 序列；MM-RoPE 坐标 <code>(t=0…L−1, 0, 0)</code>；AdaLN 用 TEXT 档、该样本音频的 t；28 层都会更新文本行，最后丢弃</td><td class="src">dit/packing.py · model.py</td></tr>
+      </tbody>
+    </table>
+    <p class="dim">
+      为什么取第 50 层而不是第 64 层：照搬 H3。常见解释是因果 LM 越靠后的层越偏向“预测下一个 token”，中后层的语义表示更通用（推测，H3 没有公开消融）。
+      层数是配置项 <code>text.num_layers</code>，S2 消融可以改。
+    </p>
+
+    <h3>其它约定</h3>
+    <ul>
+      <li>
+        用 H3 自带 tokenizer（<code>paths.h3_tokenizer</code>）。<code>tokenizer_config.json</code> 新增 7 个 token（151669–151675）：
+        <code>&lt;d&gt;</code>、<code>&lt;/d&gt;</code>、<code>&lt;|cutoff|&gt;</code>、<code>&lt;|lyrics_start|&gt;</code>、<code>&lt;|lyrics_end|&gt;</code>、<code>&lt;|caption_start|&gt;</code>、<code>&lt;|caption_end|&gt;</code>；
+        T2VA 的 caption 只用到 <code>&lt;d&gt;</code> / <code>&lt;/d&gt;</code>。
+      </li>
+      <li>
+        这 7 个 id 在 H3 Qwen 里的 embedding 范数约 0.50，和没用到的 padding 行一样（正常 token 中位数约 1.15），
+        说明 H3 没训练过它们，只当标记用。换更小的 Qwen3-VL（vocab 同为 151936）时，把 H3 的 tokenizer 目录拷过去即可，不丢预训练语义。
+      </li>
+      <li>新增 token 只写在 <code>tokenizer_config.json</code>，单读 <code>tokenizer.json</code> 会把 <code>&lt;d&gt;</code> 拆成字符；要经 <code>AutoTokenizer.from_pretrained(目录)</code> 加载（<code>chrome/data/captions.py</code>）。</li>
+      <li>视觉塔（约 0.6B）和 <code>lm_head</code> 本来就不加载：代码只读 <code>model.language_model.*</code> 下的 <code>embed_tokens</code> 和前 50 层。50 层合计约 24.4B 参数、48.8 GB bf16，每个 token 前向约 49 GFLOP。</li>
+      <li>Qwen 不听音频，也不吃 AudioVAE 的 token。H3 的 Ref2VA 里参考音频走 AudioVAE 进 DiT，文本里只用 <code>&lt;Audio N&gt;</code> 点名；Chrome 目前没有这条路（§02 Q1）。</li>
+      <li>路径只写在 <code>configs/_base_/paths.yaml</code> 的 <code>h3_text_encoder</code>。</li>
+      <li>
+        编码器按名字注册（<code>qwen3_vl</code>；单测用 <code>random</code>），外面套 <code>CachedTextEncoder</code>：内存 LRU → 磁盘（每条 caption 一个 safetensors，按编码器指纹分目录，原子写，多 rank 共享）→ 编码器。
+        编码器在第一次未命中时才加载，缓存填满的训练不加载 Qwen。<code>scripts/text/cache_text.sh</code> 预填缓存，并把逐维 mean / std 写到 <code>&lt;cache dir&gt;/stats.safetensors</code>。
+      </li>
+    </ul>
+
+    <h3>第 50 层的异常值（实测）</h3>
+    <p>
+      这是 LLM 常见的 massive activation，每条 caption 都有：第 0 个 token 在第 731 维约 <strong>15872</strong>，整行 RMS 约 224；
+      其它 token 的行 RMS 约 4.25，26600 行里只有 1 行超过 500。
+    </p>
+    <table>
+      <thead><tr><th>影响面</th><th>实测</th></tr></thead>
+      <tbody>
+        <tr><td><code>condition_proj</code> 的梯度</td><td>第 731 列约占它自身梯度的 75%</td></tr>
+        <tr><td>全模型梯度</td><td>只占 0.7%</td></tr>
+        <tr><td>进主干时</td><td>refiner 最后的 RMSNorm 逐行归一化，这一行已经不突出</td></tr>
+      </tbody>
+    </table>
+    <p>
+      所以默认 <code>dit.text_norm: none</code>（同 H3），另有两个消融选项：
+      <code>rmsnorm</code>（<code>condition_proj</code> 前逐行 RMSNorm）；
+      <code>stats</code>（用 <code>stats.safetensors</code> 逐维标准化，统计<strong>包含</strong>第 0 个 token，第 731 维的 std 因此变大，标准化后不会炸；可配 <code>dit.text_clip</code>，例如 8）。
+      统计量是 DiT 的 buffer，跟着 checkpoint 走。
+    </p>
+
+    <h3 id="refiner">进 DiT 前的适配层：condition_proj + token refiner</h3>
+    <p>
+      Qwen 的输出是冻结的 5120 维特征，DiT 的行宽是 4096。中间这段是<strong>属于 DiT 的可训练模块</strong>（共 0.457B），做三件事：
+      先用 <code>condition_proj</code> 把维度从 5120 线性映射到 4096，再用 2 个 refiner block 在<strong>每条 caption 内部</strong>做双向自注意力和 FFN 重新编码，
+      最后用一个 RMSNorm 把每行拉到同一尺度，然后才放进单流序列。它们不看音频，也不看时间步 t。
+    </p>
+    <div class="fig">
+      <svg class="dg" viewBox="0 0 1120 300" role="img" aria-label="condition_proj 与 token refiner 结构">
+        <defs>
+          <marker id="ah4b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8fa3c8"/></marker>
+        </defs>
+        <rect class="ice" x="20" y="65" width="150" height="56" rx="10"/>
+        <text class="t" x="32" y="87">text_rows</text>
+        <text class="m" x="32" y="106">[ΣL, 5120] bf16</text>
+        <text class="s" x="32" y="140">Qwen 第 50 层 · 冻结</text>
+
+        <path class="stopline" d="M184,38 V150"/>
+        <text class="w" x="184" y="32" text-anchor="middle">stop-grad</text>
+
+        <rect class="gray" x="196" y="65" width="120" height="56" rx="10"/>
+        <text class="t" x="208" y="87">text_norm</text>
+        <text class="s" x="208" y="106">10B：none（同 H3）</text>
+        <text class="s" x="200" y="140">可选 rmsnorm / stats</text>
+
+        <rect class="hot" x="334" y="65" width="166" height="56" rx="10"/>
+        <text class="t" x="346" y="87">condition_proj</text>
+        <text class="m" x="346" y="106">Linear 5120→4096</text>
+        <text class="s" x="346" y="140">带 bias · 20.98M</text>
+
+        <rect class="zone" x="520" y="40" width="400" height="152" rx="12"/>
+        <text class="w" x="536" y="58">RefinerBlock × 2（串联，每个 218.1M，pre-norm 残差）</text>
+        <rect class="hot" x="536" y="68" width="368" height="50" rx="9"/>
+        <text class="t" x="548" y="88">① RMSNorm → Attention → 残差相加</text>
+        <text class="s" x="548" y="106">32 头×128 · QK-RMSNorm · 无 RoPE · 文本内双向</text>
+        <rect class="hot" x="536" y="130" width="368" height="50" rx="9"/>
+        <text class="t" x="548" y="150">② RMSNorm → SwiGLU → 残差相加</text>
+        <text class="s" x="548" y="168">4096 → 2×12288 → 4096 · 与主干 FFN 同宽</text>
+
+        <rect class="hot" x="940" y="65" width="160" height="56" rx="10"/>
+        <text class="t" x="952" y="87">final_norm</text>
+        <text class="m" x="952" y="106">RMSNorm(4096)</text>
+        <text class="s" x="952" y="140">逐行拉回同一尺度</text>
+
+        <path class="ln" d="M170,93 H194" marker-end="url(#ah4b)"/>
+        <path class="ln" d="M316,93 H332" marker-end="url(#ah4b)"/>
+        <path class="ln" d="M500,93 H534" marker-end="url(#ah4b)"/>
+        <path class="ln" d="M720,118 V128" marker-end="url(#ah4b)"/>
+        <path class="ln" d="M904,155 H922 V93 H938" marker-end="url(#ah4b)"/>
+        <path class="ln" d="M1072,121 V226" marker-end="url(#ah4b)"/>
+
+        <rect class="op" x="900" y="228" width="200" height="56" rx="10"/>
+        <text class="t" x="912" y="250">scatter 进单流序列</text>
+        <text class="m" x="912" y="269">x[text_pos] [ΣL,4096]</text>
+        <path class="ln" d="M900,256 H882" marker-end="url(#ah4b)"/>
+
+        <rect class="hot" x="600" y="228" width="280" height="56" rx="10"/>
+        <text class="t" x="612" y="250">DiTBlock × 28（文本行也更新）</text>
+        <text class="s" x="612" y="269">MM-RoPE t=0…L−1 · AdaLN TEXT 档 · 本样本 t</text>
+
+        <rect class="zone" x="20" y="222" width="560" height="68" rx="12"/>
+        <text class="w" x="36" y="243">橙色可训练：随 DiT 一起从头训（Xavier 初始化，同一 AdamW / EMA / checkpoint）</text>
+        <text class="s" x="36" y="262">refiner 只看本样本的文本行（text_cu_seqlens），看不到音频，也不接收 t</text>
+        <text class="s" x="36" y="280">梯度停在 condition_proj 的输入：Qwen 输出来自缓存或 no_grad，是常量</text>
+      </svg>
+      <p class="fig-title">
+        图 4b. 代码：<code>chrome/dit/model.py · forward</code>（第 113–124 行）和 <code>chrome/dit/layers.py · TokenRefinerBlock / TokenRefiner</code>。
+        ΣL 是一个包里所有样本的 caption token 数之和（每卡每步约 32 × 56 ≈ 1.8k 行）；文本行在 refiner 里拼成一条，用 <code>text_cu_seqlens</code> 按样本切段。
+      </p>
+    </div>
+
+    <table>
+      <thead><tr><th>模块</th><th>形状</th><th>参数</th><th>在做什么</th><th>训练吗</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>text_norm</code></td><td>[ΣL, 5120] → 同形</td><td>10B 为 0</td>
+          <td>10B 配置 <code>none</code>：什么都不做，原样把 Qwen 特征交给 <code>condition_proj</code>。<code>rmsnorm</code> / <code>stats</code> 是消融选项（见上一节）</td>
+          <td>none 时不存在；stats 是固定 buffer，不训练</td>
+        </tr>
+        <tr>
+          <td><code>condition_proj</code></td><td>[ΣL, 5120] → [ΣL, 4096]</td><td>20.98M<br><span class="dim">5120×4096 + 4096</span></td>
+          <td>逐 token 的线性映射，把 Qwen 的语义空间换到 DiT 的 4096 维行宽。它是唯一直接读原始 5120 维特征的层，第 0 个 token 的 massive activation 也最先打在它身上</td>
+          <td>训练</td>
+        </tr>
+        <tr>
+          <td>RefinerBlock ×2</td><td>[ΣL, 4096] → 同形</td><td>每个 218.1M<br><span class="dim">qkv 50.3M · out 16.8M · fc1 100.7M · fc2 50.3M</span></td>
+          <td>结构和主干 block 一样宽，但<strong>没有 AdaLN、没有 RoPE</strong>，注意力只在本条 caption 的文本行内部、双向。作用是在冻结的 Qwen 特征上加一段可训练的非线性改写，并让每个 token 看到整句（Qwen 是因果的，前面的 token 看不到后面的词）</td>
+          <td>训练</td>
+        </tr>
+        <tr>
+          <td><code>final_norm</code></td><td>[ΣL, 4096] → 同形</td><td>4096</td>
+          <td>逐行 RMSNorm，让每个文本行以相近的尺度进入主干，和 <code>audio_patch_proj</code> 输出的音频行放在同一个残差流里。异常大的第 0 行到这里不再突出</td>
+          <td>训练（只有 γ）</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h4>refiner 和主干 DiTBlock 的区别</h4>
+    <table>
+      <thead><tr><th></th><th>RefinerBlock</th><th>DiTBlock（主干）</th></tr></thead>
+      <tbody>
+        <tr><td>处理哪些行</td><td>只有文本行</td><td>文本 + 左耳 + 右耳全部行</td></tr>
+        <tr><td>注意力范围</td><td>本条 caption 内部（<code>text_cu_seqlens</code>）</td><td>本样本全部行（<code>cu_seqlens</code>）</td></tr>
+        <tr><td>位置编码</td><td>无 RoPE：对 token 顺序不敏感，位置只能靠 Qwen 特征本身携带（Qwen 的 50 层已经带了 RoPE 和因果顺序）</td><td>MM-RoPE，文本行坐标 <code>(0…L−1, 0, 0)</code>，音频从 t=L 开始</td></tr>
+        <tr><td>时间步 t</td><td>不接收：输出只由 caption 决定，50 步采样里每一步都相同</td><td>AdaLN 按 (t, 模态) 调制，文本行用 TEXT 档</td></tr>
+        <tr><td>激活重算</td><td>不重算（文本行少，激活不到 1 GB，估算）</td><td>每个 block 重算</td></tr>
+        <tr><td>FSDP</td><td>每个 block 一个分片单元；<code>condition_proj</code>、<code>final_norm</code> 在 root</td><td>每个 block 一个分片单元</td></tr>
+      </tbody>
+    </table>
+
+    <h4>为什么要有它</h4>
+    <ul>
+      <li><strong>Qwen 是冻结的</strong>：只靠一层线性映射，DiT 只能对 Qwen 特征做旋转和缩放。refiner 提供 0.44B 参数，专门把文本特征改写成音频生成好用的形式，而不用去动 32B 的编码器。</li>
+      <li><strong>Qwen 是因果的</strong>：第 i 个 token 的特征只看过前 i 个词。refiner 的双向注意力让每个 token 看到整句。主干里文本行之间也是双向的，但那里的文本行同时受 t 调制、和音频混在一起。</li>
+      <li><strong>先把文本处理好，再和噪声混</strong>：refiner 不接收 t，文本表示在所有噪声强度下是同一份；进了主干之后才按 t 调制。</li>
+      <li>以上是设计上的解释。结构和参数名照搬 H3（DiffSynth <code>MiniMaxH3DiT</code> 的 <code>condition_proj</code> / <code>token_refiner</code>，同样 2 层），H3 没公开去掉 refiner 的消融。</li>
+    </ul>
+
+    <h4>训练与梯度</h4>
+    <ul>
+      <li><strong>都训练，从头训</strong>：它们是 <code>ChromeDiT</code> 的子模块，<code>requires_grad=True</code>。初始化是 Xavier 权重、零 bias（<code>init_weights</code>），<code>train.init_from: null</code>，不加载 H3 权重。</li>
+      <li><strong>和主干同一套设置</strong>：AdamW lr 1e-4，矩阵权重 weight decay 0.01，bias 和 RMSNorm 的 γ 不加；梯度裁剪 1.0；EMA 0.9999；fp32 主权重、bf16 计算；一起存进 checkpoint 和导出的 <code>ema.safetensors</code>。</li>
+      <li><strong>梯度只到这里</strong>：Qwen 的输出要么从缓存读，要么在 <code>no_grad</code> 下算，是常量，所以反传停在 <code>condition_proj</code> 的输入。</li>
+      <li>
+        <strong>训练日志</strong>：<code>gn/condition_proj</code> 在第 20 步是 0.0000，第 40 步 0.0001，第 11.6k 步 0.0037，第 24.3k 步 0.0026（同期总梯度范数约 0.088）。
+        一开始是 0，是因为 AdaLN 的门和 <code>audio_out</code> 都零初始化：文本只能通过主干的注意力影响音频，门关着时梯度传不回来。门打开后它才开始学。
+      </li>
+      <li><strong>代价</strong>：参数占 4.2%；每个文本行前向约 0.91 GFLOP，按每卡每步约 1.8k 文本行算约 1.7 TFLOP，约为主干的 0.5%；按 20 B/参数算训练状态约 9 GB，8 卡分片后每卡约 1.1 GB。</li>
+    </ul>
+
+    <div class="callout warn">
+      <div class="title">S2 要消融：Qwen 规模主要是算力问题</div>
+      <p style="margin:0">
+        截断 32B 编码一条约 200 token 的 caption 约 10 TFLOP；1B DiT 训一个 15 s 样本约 7 TFLOP，10B 约 55 TFLOP。
+        在线编码时，1B 消融里 Qwen 比 DiT 本身还贵，10B 也要多出约 18%。
+        离线缓存每条 = L × 5120 × 2 B。这次数据均值约 56 token，每条约 0.58 MB，1010 万条约 5.9 TB（200 token 的长 caption 每条约 2 MB）。
+        1B 消融比较更小的 Qwen3-VL 和截断 32B；保持 VL 系列，S5 才有现成的视觉语义通路。
+      </p>
+    </div>
+  </section>
+
+  <!-- ========== 10 ========== -->
+  <section class="section" id="dit">
+    <h2><span class="num">10</span>生成模型（已实现，<code>chrome/dit/</code>）</h2>
+    <p>
+      单流 packed varlen DiT。条件与噪声目标在同一条序列里做 self-attn，没有单独的音→画 cross-attn 模块。
+      模态特异参数主要在 I/O 头和 AdaLN；Attn / FFN 共享。
+    </p>
+
+    <h3>图 5 · ChromeDiT 内部（10B 预设）</h3>
+    <div class="fig">
+      <svg class="dg" viewBox="0 0 1120 340" role="img" aria-label="DiT 结构">
+        <defs>
+          <marker id="ah5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8fa3c8"/></marker>
+          <marker id="ah5o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ff8a4c"/></marker>
+        </defs>
+        <rect class="box" x="20" y="30" width="170" height="60" rx="10"/>
+        <text class="t" x="32" y="52">text_rows</text>
+        <text class="m" x="32" y="72">[ΣL, 5120] · Qwen 输出</text>
+        <rect class="box" x="20" y="112" width="170" height="60" rx="10"/>
+        <text class="t" x="32" y="134">audio_rows xσ</text>
+        <text class="m" x="32" y="154">[Σ2T, 32] · 加噪 latent</text>
+        <rect class="box" x="20" y="194" width="170" height="60" rx="10"/>
+        <text class="t" x="32" y="216">t_rows（t = 1 − σ）</text>
+        <text class="m" x="32" y="236">[S] · 每行一个</text>
+
+        <rect class="hot" x="210" y="22" width="206" height="76" rx="10"/>
+        <text class="t" x="222" y="42">condition_proj + refiner×2</text>
+        <text class="s" x="222" y="60">Linear 5120→4096 → 2 个 block</text>
+        <text class="s" x="222" y="76">文本内双向 · 无 RoPE / AdaLN</text>
+        <text class="m" x="222" y="92">21M + 436M</text>
+        <rect class="hot" x="210" y="112" width="206" height="60" rx="10"/>
+        <text class="t" x="222" y="134">audio_patch_proj</text>
+        <text class="m" x="222" y="154">Linear 32→4096 · 0.13M</text>
+        <rect class="hot" x="210" y="186" width="206" height="76" rx="10"/>
+        <text class="t" x="222" y="206">TimeEmbedder（unique t）</text>
+        <text class="s" x="222" y="224">t∈[0,1] 直接进 sin/cos（256 维）</text>
+        <text class="s" x="222" y="240">→ Linear 4096 → SiLU → 2048</text>
+        <text class="m" x="222" y="256">9.4M</text>
+
+        <rect class="op" x="436" y="22" width="150" height="150" rx="10"/>
+        <text class="t" x="448" y="44">scatter 成序列</text>
+        <text class="m" x="448" y="66">index_add →</text>
+        <text class="m" x="448" y="82">x [S, 4096]</text>
+        <text class="s" x="448" y="104">RoPE 角度 [S, 96]</text>
+        <text class="s" x="448" y="122">cu_seqlens</text>
+        <text class="s" x="448" y="140">tag：TEXT=1 / AUDIO=2</text>
+        <text class="s" x="448" y="158">pad 行为 0</text>
+
+        <rect class="hot" x="436" y="186" width="150" height="90" rx="10"/>
+        <text class="t" x="448" y="206">AdaLN（每层一个）</text>
+        <text class="m" x="448" y="226">Linear 2048 →</text>
+        <text class="m" x="448" y="242">6 × 4096 × 3 档</text>
+        <text class="s" x="448" y="262">按 t档×3+tag 取行</text>
+
+        <rect class="zone" x="606" y="14" width="330" height="262" rx="14" style="stroke:rgba(255,138,76,.55)"/>
+        <text class="lane" x="620" y="32" style="fill:#ff8a4c">DiTBlock × 28（每块存输入，反传时重算）</text>
+        <rect class="box" x="620" y="44" width="302" height="32" rx="8"/>
+        <text class="s" x="632" y="65">RMSNorm → x·(1+scale₁) + shift₁</text>
+        <rect class="box" x="620" y="84" width="302" height="44" rx="8"/>
+        <text class="s" x="632" y="102">Attention：QKV → Q/K RMSNorm</text>
+        <text class="s" x="632" y="119">→ MM-RoPE（前 96 维）→ varlen flash</text>
+        <rect class="box" x="620" y="136" width="302" height="28" rx="8"/>
+        <text class="s" x="632" y="155">x ← x + gate₁ · attn</text>
+        <rect class="box" x="620" y="172" width="302" height="44" rx="8"/>
+        <text class="s" x="632" y="190">RMSNorm → x·(1+scale₂) + shift₂</text>
+        <text class="s" x="632" y="207">→ SwiGLU（4096→2×12288→4096）</text>
+        <rect class="box" x="620" y="224" width="302" height="28" rx="8"/>
+        <text class="s" x="632" y="243">x ← x + gate₂ · mlp</text>
+
+        <rect class="hot" x="956" y="44" width="150" height="80" rx="10"/>
+        <text class="t" x="968" y="64">FinalLayer</text>
+        <text class="s" x="968" y="82">RMSNorm + 时间调制</text>
+        <text class="s" x="968" y="98">没有模态档，没有 gate</text>
+        <text class="m" x="968" y="116">16.8M</text>
+        <rect class="hot" x="956" y="160" width="150" height="80" rx="10"/>
+        <text class="t" x="968" y="180">audio_out</text>
+        <text class="s" x="968" y="198">只取音频行（文本行丢弃）</text>
+        <text class="m" x="968" y="216">4096→32</text>
+        <text class="m" x="968" y="232">v̂ [Σ2T, 32]</text>
+
+        <path class="ln" d="M190,60 H208" marker-end="url(#ah5)"/>
+        <path class="ln" d="M190,142 H208" marker-end="url(#ah5)"/>
+        <path class="ln" d="M190,224 H208" marker-end="url(#ah5)"/>
+        <path class="ln" d="M416,60 H434" marker-end="url(#ah5)"/>
+        <path class="ln" d="M416,142 H434" marker-end="url(#ah5)"/>
+        <path class="ln" d="M416,224 H434" marker-end="url(#ah5)"/>
+        <path class="ln" d="M586,96 H604" marker-end="url(#ah5)"/>
+        <path class="ln o d" d="M586,231 H600 V60 H618" marker-end="url(#ah5o)"/>
+        <path class="ln o d" d="M600,194 H618" marker-end="url(#ah5o)"/>
+        <path class="ln" d="M936,84 H954" marker-end="url(#ah5)"/>
+        <path class="ln" d="M1031,124 V158" marker-end="url(#ah5)"/>
+
+        <text class="w" x="20" y="300">每个 block：Attn 67.1M + FFN 151.0M + AdaLN 151.1M = 369.2M；× 28 = 10.34B，占总参 95.5%。</text>
+        <text class="s" x="20" y="320">初始化：Linear 用 Xavier，偏置为 0；AdaLN 和输出头全 0（gate 从 0 开始，每个 block 起步是恒等映射，起步预测 v̂ = 0）。</text>
+      </svg>
+      <p class="fig-title">
+        图 5. 橙色虚线是 AdaLN 调制：每层自己的 Linear 把时间嵌入投成 3 档 × 6 个量（shift/scale/gate 各两组），
+        每一行按“自己的 t 档 × 3 + 自己的 tag”取一组。文本行和音频行共用同一套 Attention / FFN 权重，区别只在 AdaLN 档位和输入输出投影。
+      </p>
+    </div>
+
+    <h3>图 6 · 注意力里谁能看见谁</h3>
+    <div class="fig">
+      <svg class="dg" viewBox="0 0 1120 310" role="img" aria-label="注意力可见性">
+        <rect x="60" y="40" width="140" height="140" fill="rgba(124,240,196,.16)" stroke="rgba(124,240,196,.7)"/>
+        <rect x="200" y="180" width="95" height="95" fill="rgba(124,240,196,.16)" stroke="rgba(124,240,196,.7)"/>
+        <rect x="295" y="275" width="25" height="25" fill="rgba(148,163,184,.18)" stroke="rgba(148,163,184,.6)"/>
+        <rect x="60" y="40" width="260" height="260" fill="none" stroke="rgba(148,163,184,.35)"/>
+        <path d="M80,40 V180 M140,40 V180 M60,60 H200 M60,120 H200" stroke="rgba(124,240,196,.35)" stroke-dasharray="3 3"/>
+        <path d="M215,180 V275 M255,180 V275 M200,195 H295 M200,235 H295" stroke="rgba(124,240,196,.35)" stroke-dasharray="3 3"/>
+        <rect x="60" y="28" width="20" height="8" fill="#c4a0ff"/><rect x="80" y="28" width="60" height="8" fill="#7cf0c4"/><rect x="140" y="28" width="60" height="8" fill="#5eead4" opacity=".6"/>
+        <rect x="200" y="28" width="15" height="8" fill="#c4a0ff"/><rect x="215" y="28" width="40" height="8" fill="#7cf0c4"/><rect x="255" y="28" width="40" height="8" fill="#5eead4" opacity=".6"/>
+        <rect x="295" y="28" width="25" height="8" fill="#94a3b8" opacity=".5"/>
+        <rect x="48" y="40" width="8" height="20" fill="#c4a0ff"/><rect x="48" y="60" width="8" height="60" fill="#7cf0c4"/><rect x="48" y="120" width="8" height="60" fill="#5eead4" opacity=".6"/>
+        <rect x="48" y="180" width="8" height="15" fill="#c4a0ff"/><rect x="48" y="195" width="8" height="40" fill="#7cf0c4"/><rect x="48" y="235" width="8" height="40" fill="#5eead4" opacity=".6"/>
+        <rect x="48" y="275" width="8" height="25" fill="#94a3b8" opacity=".5"/>
+        <text class="s" x="130" y="20" text-anchor="middle">样本 A</text>
+        <text class="s" x="248" y="20" text-anchor="middle">样本 B</text>
+        <text class="s" x="330" y="20">pad</text>
+        <text class="s" x="130" y="114" text-anchor="middle">全可见</text>
+        <text class="s" x="248" y="232" text-anchor="middle">全可见</text>
+        <text class="s" x="190" y="252" text-anchor="middle">看不见</text>
+        <text class="s" x="270" y="114" text-anchor="middle">看不见</text>
+
+        <rect x="400" y="40" width="12" height="12" fill="#c4a0ff"/><text class="s" x="420" y="51">文本行</text>
+        <rect x="480" y="40" width="12" height="12" fill="#7cf0c4"/><text class="s" x="500" y="51">音频 L</text>
+        <rect x="560" y="40" width="12" height="12" fill="#5eead4" opacity=".6"/><text class="s" x="580" y="51">音频 R</text>
+        <rect x="640" y="40" width="12" height="12" fill="#94a3b8" opacity=".5"/><text class="s" x="660" y="51">pad</text>
+        <text class="t" x="400" y="86">同一样本内：文本 ↔ 左耳 ↔ 右耳全部互相可见，双向，不是因果</text>
+        <text class="t" x="400" y="114">样本之间完全隔离：cu_seqlens 切段，flash-attn varlen，不需要显式 mask</text>
+        <text class="t" x="400" y="142">pad 自成一段，只看自己，输出不用</text>
+        <text class="t" x="400" y="170">CFG 推理：条件和无条件是两条样本，互相看不见</text>
+        <text class="t" x="400" y="198">左右耳的 w 坐标只是 RoPE 上的软偏置，不是 mask（§11）</text>
+        <text class="t" x="400" y="226">refiner：只在文本行内部做同样的分段注意力（text_cu_seqlens）</text>
+        <text class="s" x="400" y="258">矩阵示意：行 = query，列 = key；每个样本内部依次是文本、左耳 T 行、右耳 T 行（channel-major）。</text>
+        <text class="s" x="400" y="276">一个单卡包里约 32 条样本，对角线上约 32 个方块；平均每块约 770 行，注意力约占 DiT 计算的 3%。</text>
+      </svg>
+    </div>
+
+    <h3>要点</h3>
+    <ul>
+      <li>音频 / 视频 / 文本各自投影到 4096，再 <code>index_add</code> 进同一条 <code>[S, 4096]</code>；没有 cross-attn。</li>
+      <li>文本先过 2 层 token refiner（无 AdaLN、无 RoPE），再进 28 个 DiTBlock。refiner 不受 t 调制，主干里的文本行受 t 调制。</li>
+      <li>MLP = SwiGLU；Q/K 各做一次 RMSNorm（按 head_dim）；Attention 不带 bias。</li>
+      <li>音频每行输入输出都是 32 维（一耳一帧）。视频预留 patch (1,2,2) → 行宽 96，T2A 冻结不用（<code>set_video_trainable(False)</code>）。</li>
+      <li>损失只算 <code>audio_target=True</code> 的行。T2A 里所有音频行都是 target，所以等于全部音频行。
+        “干净行 t 钉 1.0、不进 loss”的机制在 <code>Segment(clean, target)</code> 里，但 T2A layout 不产生这种行（§02 Q1）。</li>
+      <li>精度：训练是 bf16 计算 + fp32 主权重；RoPE 位置用 fp64 存、fp32 算角度；时间正弦用 fp32。FSDP 设了 <code>cast_forward_inputs=False</code>，避免位置和 t 被转成 bf16。</li>
+    </ul>
+
+    <h3>T2A packed 布局</h3>
+    <div class="pack-bar">
+      <div class="seg txt">
+        <div class="who">TEXT</div>
+        <div class="meta">tag=1 · 行宽 hidden<br>Qwen 5120 → proj → refiner</div>
+      </div>
+      <div class="seg vid" style="opacity:.45">
+        <div class="who">VIDEO（空）</div>
+        <div class="meta">tag=0 预留<br>S5 才有行</div>
+      </div>
+      <div class="seg aud">
+        <div class="who">AUDIO L 然后 R</div>
+        <div class="meta">tag=2 · 行宽 32<br>rows = T × 2</div>
+      </div>
+      <div class="seg pad">
+        <div class="who">PAD</div>
+        <div class="meta">tag=-1<br>ceil(used/64)*64</div>
+      </div>
+    </div>
+<pre># T2A（当前阶段）
+layout   = [ text L | audio A(=T×2) | pad P ]
+seq_len  = ceil(used / 64) * 64
+token_tags: TEXT=1 · AUDIO=2 · PAD=-1
+# VIDEO=0 的档位留在 AdaLN 里，序列上没有视频行
+
+# S5 接视频后（H3 FL 布局，不改骨架）
+layout   = [ text | keyframe_cond? | target_audio | target_video | pad ]
+# Ref2VA: [ text | ref_blocks… | target_audio | target_video | pad ]
+</pre>
+
+    <h3>AdaLN 三档</h3>
+    <p>
+      每层 <code>SiLU → Linear(2048 → 4096 × 18)</code>。
+      18 = 3 档模态 × 6 个调制量（两组 scale / shift / gate，分别给 attn 和 FFN）。
+      先对整包的 t 做 <code>torch.unique</code>，只对这 U 个 t 算 AdaLN（训练时 U ≈ 每包样本数 + 1 ≈ 33，推理时 U = 2；多出的那个是 pad 行的 1.0），
+      得到 <code>[U·3, 6·4096]</code>，每行再按 <code>idx = t档 × 3 + tag</code> 用 <code>index_select</code> 取出来。代码每次前向都重算，没有跨步缓存。
+    </p>
+    <div class="lut">
+      <div class="r"></div>
+      <div class="h vid">VIDEO = 0</div>
+      <div class="h txt">TEXT = 1</div>
+      <div class="h aud">AUDIO = 2</div>
+      <div class="r">T2A</div>
+      <div class="c off"><div class="cell">预留</div><div class="sub">序列上无行</div></div>
+      <div class="c"><div class="cell">用</div><div class="sub">caption / 空格 CFG · t 跟音频</div></div>
+      <div class="c"><div class="cell">用</div><div class="sub">目标轨；L/R 同档</div></div>
+    </div>
+    <p>
+      AdaLN 时间输入是 <code>t = 1 − σ</code>（1 = 干净）。pad 行 t 也填 1.0。若将来有 <code>clean=True</code> 的参考行，t 同样钉 1.0。
+      最终层只有时间维的 shift/scale，<strong>无模态、无 gate</strong>；音画分叉靠两个 out 头。
+    </p>
+    <div class="callout orange">
+      <div class="title">文本行用哪个 t：Chrome 约定跟音频</div>
+      <p style="margin:0">
+        H3 里文本行的 t 是<strong>视频</strong>的 <code>t_video</code>（整条序列先填 <code>t_video</code>，再把音频行改成 <code>t_audio</code>），
+        T2A 没有视频，这一项必须自己定。
+        Chrome 约定：文本行用 <code>t_audio</code>，S5 加视频后也不改。
+        我们从零训，不需要和 H3 权重兼容；若 T2A 用音频 t、S5 再换成视频 t，文本条件的调制会整体漂移。
+        Qwen 侧的视觉 token（S5 才有）tag=0，t 同样跟音频。
+      </p>
+    </div>
+  </section>
+
+  <!-- ========== 11 ========== -->
+  <section class="section" id="rope">
+    <h2><span class="num">11</span>RoPE：MM-RoPE，split-half</h2>
+    <p>已实现对齐 H3 的 <code>MiniMaxH3Rope</code>。T2A 也用三维 (t, h, w)，不是 1D 时间 RoPE。</p>
+
+    <table>
+      <thead><tr><th>项</th><th>约定</th></tr></thead>
+      <tbody>
+        <tr><td>轴</td><td>(t, h, w) 三轴，每轴 16 个频率</td></tr>
+        <tr><td>θ</td><td><code>rope_theta = 10000</code>，<code>inv_freq[i] = 10000^(−i/16)</code></td></tr>
+        <tr><td>旋转宽度</td><td>head_dim=128 的<strong>前 96 维</strong>；后 32 维不转</td></tr>
+        <tr><td>拼法</td><td>每轴 16 → cat 成 48 → <strong>duplicate</strong> 成 96</td></tr>
+        <tr><td>旋转公式</td><td>split-half：<code>(x1, x2) → x1·cos + (−x2, x1)·sin</code></td></tr>
+        <tr><td>打在哪</td><td>只打 Attention 的 Q/K；Token Refiner 的 <code>rope_freqs=None</code></td></tr>
+        <tr><td>坐标表</td><td><code>img_position_ids [S, 3]</code> fp64（名字带 img，音频也用）</td></tr>
+        <tr><td>空间缩放</td><td><code>_INTERP = 32</code>，按 sqrt-area 把画面比例映射到 RoPE 单位</td></tr>
+      </tbody>
+    </table>
+
+    <h3>各模态怎么填 (t, h, w)</h3>
+    <table>
+      <thead><tr><th>模态</th><th>t</th><th>h</th><th>w</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>文本</td>
+          <td><code>arange(text_len)</code></td>
+          <td>0</td>
+          <td>0</td>
+        </tr>
+        <tr>
+          <td>音频 L</td>
+          <td><code>text_len + arange(T)</code>（与 R 共享）</td>
+          <td>0</td>
+          <td>画布最左</td>
+        </tr>
+        <tr>
+          <td>音频 R</td>
+          <td>同上</td>
+          <td>0</td>
+          <td>画布最右</td>
+        </tr>
+        <tr>
+          <td>目标视频（S5）</td>
+          <td>视频时间网格，原点 = text_len；与 40 Hz 音频用 5/3 对齐</td>
+          <td colspan="2">2×2 patch 的空间网格</td>
+        </tr>
+        <tr>
+          <td>FL 首帧</td>
+          <td><code>text_len</code></td>
+          <td colspan="2">与目标画幅同一套 h/w</td>
+        </tr>
+        <tr>
+          <td>FL 尾帧</td>
+          <td><code>text_len + temporal_span − 5/3</code></td>
+          <td colspan="2">同上</td>
+        </tr>
+        <tr>
+          <td>PAD</td>
+          <td colspan="3">不参与 attn（cu_seqlens 切掉）</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn">
+      <div class="title">w 钉两端是软偏置，不是 mask</div>
+      <p style="margin:0">
+        左耳仍然能看见整段文本和右耳（满 attn）。
+        没有「左半屏只给左耳」。
+        不填 h/w 的话，音频会落在 (t, 0, 0)，和文本挤在原点，L 与 R 无法区分。
+      </p>
+    </div>
+<pre># 10 s T2A 例子（整秒，T=400）
+text:   t = 0 … L-1          h=0   w=0
+audioL: t = L … L+399        h=0   w=w_L
+audioR: t = L … L+399        h=0   w=w_R
+# 行序仍是先 400 个 L，再 400 个 R；t 重复两遍
+</pre>
+  </section>
+
+  <!-- ========== 12 ========== -->
+  <section class="section" id="cond">
+    <h2><span class="num">12</span>条件格式、参考音频、按 token 选择性去噪</h2>
+
+    <h3>当前阶段（T2A）支持什么</h3>
+    <table>
+      <thead><tr><th>条件</th><th>T2A 现在</th><th>S5 / H3 以后</th><th>缺了怎么办</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>文本 caption</td>
+          <td><strong>主条件</strong>。Qwen3-VL hidden → token refiner</td>
+          <td>仍是主语义；可带视觉 token（图/视频抽帧）</td>
+          <td><strong>可以缺</strong>。训练 10% 丢掉 caption：用<strong>单个空格 <code>" "</code> 重新编码</strong>（1 个 token），不是把 embedding 置零，也不用 <code>""</code>（0 个 token）</td>
+        </tr>
+        <tr>
+          <td>目标音频</td>
+          <td>训练监督；推理从噪声出发</td>
+          <td>同左</td>
+          <td>训练不能缺。H3 可用静音垫（<code>--silent_on_missing_audio</code>）；T2A 开训前再定要不要跟</td>
+        </tr>
+        <tr>
+          <td>参考音频</td>
+          <td><span class="tag d">不支持</span>没有输入口，权重也没训过（见下文）</td>
+          <td>Ref2VA：整段 μ 作为干净行放进序列，t=1.0，不更新、不进 loss</td>
+          <td>H3 API：音频不能当唯一输入，旁边要有图或视频</td>
+        </tr>
+        <tr>
+          <td>视频 / 首尾帧</td>
+          <td><strong>缺</strong>。序列上无 VIDEO 行，AdaLN 0 档闲置</td>
+          <td>VisualVAE 24 ch → patch 96；首尾帧可钉</td>
+          <td>T2A 合法。S5 缺视频 = 退回 T2A</td>
+        </tr>
+        <tr>
+          <td>负向 prompt</td>
+          <td>默认 <code>" "</code>。Python API <code>generate(negative=...)</code> 可换成别的文本，CLI 没开这个参数。训练只见过 <code>" "</code>，换别的文本属于分布外</td>
+          <td>H3 发布权是 CFG 蒸馏，推理默认不用</td>
+          <td><code>cfg_scale=1</code> 时不打包无条件分支，只走正分支</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3 id="ref">参考音频生成：现状和要补什么</h3>
+    <p>
+      先看 packed 序列的差别。现在每条样本只有文本和目标音频；参考生成要多一段<strong>干净的参考音频行</strong>。
+      DiT、packer、AdaLN、loss 掩码都不用改，要改的是谁来产出这段行、谁来保证它不被加噪和更新。
+    </p>
+    <div class="pack-bar">
+      <div class="seg txt"><div class="who">现在 · TEXT</div><div class="meta">t = 样本 t<br>不加噪 · 不更新</div></div>
+      <div class="seg aud"><div class="who">目标 L | R</div><div class="meta">target=True · 加噪<br>进 loss · 被 Euler 更新</div></div>
+      <div class="seg pad"><div class="who">PAD</div><div class="meta">t = 1.0<br>自成一段</div></div>
+    </div>
+    <div class="pack-bar">
+      <div class="seg txt"><div class="who">参考生成 · TEXT</div><div class="meta">同左</div></div>
+      <div class="seg vid"><div class="who">参考 L | R（未实现）</div><div class="meta">clean=True → t 钉 1.0<br>target=False → 不进 loss</div></div>
+      <div class="seg aud"><div class="who">目标 L | R</div><div class="meta">同左</div></div>
+      <div class="seg pad"><div class="who">PAD</div><div class="meta">同左</div></div>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>改哪里</th><th>改什么</th><th>量级</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><code>dit/layout.py</code></td><td>注册新 layout（如 <code>t2a_ref</code>）：文本段 + <code>audio_segment(T_ref, w, t0=L, target=False, clean=True)</code> + 目标音频段。参考段的 RoPE t 怎么排是设计点：接在目标前面是“续写”语义，另起一段是“风格参考”语义</td><td>小</td></tr>
+        <tr><td>2</td><td><code>tasks/t2a.py</code></td><td><code>prepare</code> 产出参考 latent；<code>t2a_flow_loss</code> 只给目标 latent 加噪，参考行原样拼进 rows。t 钉 1.0 和 loss 掩码已经由 <code>row_timesteps</code> / <code>audio_target</code> 处理</td><td>中</td></tr>
+        <tr><td>3</td><td>数据</td><td>参考和目标的配对：同一条音频切出前段（续写）、同一说话人或同一乐曲的另一条（音色 / 风格）。还要按一定概率丢掉参考，推理时才能对参考做 CFG</td><td>大，主要是数据工作</td></tr>
+        <tr><td>4</td><td><code>pipeline/t2a.py</code></td><td><code>velocity</code> 闭包里每步把参考行原样拼进去，DiT 输出按段切开，只把目标段的 v 交给采样器。<strong>Euler 采样器不用改</strong>，它只更新自己拿到的那份 latent</td><td>小</td></tr>
+        <tr><td>5</td><td>训练</td><td>从当前 10B 继续训，混入参考样本。现在的权重从没见过“目标行 attend 到干净音频行”，不能零样本直接用</td><td>算力</td></tr>
+        <tr><td>6</td><td>CFG</td><td>无条件分支要不要同时去掉参考；要不要文本、参考各一个 guidance scale</td><td>设计点</td></tr>
+      </tbody>
+    </table>
+    <div class="callout good">
+      <div class="title">不重训也能做的两种“弱参考”（代码都没写，只需改 pipeline）</div>
+      <ul style="margin-bottom:0">
+        <li><strong>SDEdit 式变体</strong>：不从纯噪声出发，而是从 <code>(1−σ₀)·z_ref + σ₀·ε</code> 出发，只走 σ₀ → 0 剩下的步数。σ₀ 越小越像参考。保留节奏、音色和整体结构，按新 caption 改细节。</li>
+        <li><strong>替换法 inpainting / 续写</strong>：已知那几帧每一步都用 <code>(1−σ)·z_known + σ·ε</code> 覆盖，只让未知帧自由去噪。整条样本始终共用同一个 σ，和训练分布一致，所以现在的权重就能用。缺点是接缝处一致性不如专门训练的版本。</li>
+      </ul>
+    </div>
+
+    <h3 id="selective">按 token 选择性去噪：哪些形态现在能做</h3>
+    <table>
+      <thead><tr><th>形态</th><th>例子</th><th>DiT 前向</th><th>训练 / 采样还缺什么</th></tr></thead>
+      <tbody>
+        <tr><td>条件行固定，目标行去噪</td><td>参考音频、续写、S5 视频首尾帧</td><td><span class="tag g">支持</span>clean 行 t=1.0</td><td>上表 1–5</td></tr>
+        <tr><td>同一条里部分帧固定（inpainting）</td><td>补中间 3 s、替换某一段</td><td><span class="tag g">支持</span>把音频拆成 clean 段 + target 段，同一样本内互相可见</td><td>专门训练：layout 按帧拆段，训练时随机 mask。或者用上面的替换法，不重训</td></tr>
+        <tr><td>不同行不同 σ</td><td>diffusion forcing、流式逐块生成长音频</td><td><span class="tag g">支持</span><code>t_rows</code> 逐行</td><td><code>t2a_flow_loss</code> 要支持逐行 σ；采样器要按行走 σ 表；unique t 会变多，σ 要量化成几档（否则每层 AdaLN 输出可达 GB 级）</td></tr>
+        <tr><td>同一包里不同样本不同 σ</td><td>训练常态</td><td><span class="tag g">支持</span></td><td><span class="tag g">已在用</span>每条样本独立抽 σ</td></tr>
+        <tr><td>左右耳不同 σ</td><td>已知一耳生成另一耳</td><td><span class="tag g">支持</span></td><td>同“部分帧固定”：一耳作 clean 段。训练数据里 L≠R 的比例决定效果</td></tr>
+      </tbody>
+    </table>
+
+    <h3>三种特征怎么变成同一条序列</h3>
+    <p>不对齐通道，不对齐行宽。各自投影到 hidden，再按位置 scatter。</p>
+<pre># 进 DiT 之前（H3 维；Chrome 把 5376 换成 1536 或 4096）
+text  : Qwen [L, 5120]  --condition_proj-->  refiner → [L, H]
+audio : [2, 32, T]      --pack--> [2T, 32] --audio_patch_proj--> [2T, H]
+video : [1, 24, Tv,Hv,Wv] --patch (1,2,2)--> [Nv, 96] --video_patch_proj--> [Nv, H]
+
+embeddings = zeros(S, H)
+embeddings[text_pos]  += text
+embeddings[audio_pos] += audio
+embeddings[img_pos]   += video     # T2A 这段为空
+# 此后每层 Q/K/V 都来自这条序列；used 段里互相可见
+</pre>
+
+    <div class="grid-3">
+      <div class="card">
+        <h4>文本</h4>
+        <p style="margin:0">
+          语义条件。Qwen <strong>听不见</strong>波形，也看不见 AudioVAE 的 32 维行。
+          对白靠 caption 里的 <code>&lt;d&gt;</code>（H3 tokenizer 新增 token，embedding 未训练，只是标记）。
+          单个空格 = 无条件，给 CFG 用。
+        </p>
+      </div>
+      <div class="card">
+        <h4>音频</h4>
+        <p style="margin:0">
+          连续 32 维，不是离散 codec。
+          目标行脏、走损失；参考行（若有）是干净 μ，AdaLN 钉 t=1.0。
+          L/R 同行宽、同 tag，靠 w 和独立噪声分叉。
+        </p>
+      </div>
+      <div class="card">
+        <h4>视频</h4>
+        <p style="margin:0">
+          T2A 阶段<strong>整段缺席</strong>。
+          骨架仍留 tag=0、96 维 patch 头、RoPE 的 h/w。
+          加上去时：条件行 <code>update_mask=False</code>，目标行可更新。
+        </p>
+      </div>
+    </div>
+
+    <h3>caption 格式（preview 已在用）</h3>
+    <ul>
+      <li>音乐：<code>[MUSIC]: &lt;d&gt;…&lt;/d&gt;</code>，歌词片段用 <code>&lt;S&gt; … &lt;E&gt;</code>。</li>
+      <li>语音：<code>[SPEECH]: &lt;d&gt;[English] …</code> 或 <code>[Chinese][Mandarin][Female][Young] …</code>。</li>
+      <li>环境 / AudioSet：自然语言一段，不一定带标记。</li>
+    </ul>
+    <p class="dim">
+      用 H3 仓库自带的 tokenizer：新增 7 个 token（151669–151675），caption 只用到 <code>&lt;d&gt;</code> / <code>&lt;/d&gt;</code>；
+      普通 Qwen3-VL tokenizer 会把它们切成普通字符。
+      <code>[MUSIC]</code>、<code>[SPEECH]</code>、<code>&lt;S&gt;</code>、<code>&lt;E&gt;</code> 都是普通 BPE 切分，不是特殊 token。
+    </p>
+
+    <h3>10 s T2A 维度走一遍</h3>
+<pre>caption          → Qwen layer-50  → [L, 5120] bf16
+wave 10.00s      → [2, 320000]
+encode_audio     → [2, 32, 400]     已白化 μ
+pack             → [800, 32]        先 L 400，再 R 400
++ text + pad64   → packed S
+DiT              → audio velocity [800, 32]
+unpack           → [2, 32, 400]
+decode_audio     → [2, 320000] @ 32 kHz
+</pre>
+  </section>
+
+  <!-- ========== 13 ========== -->
+  <section class="section" id="flow">
+    <h2><span class="num">13</span>Flow matching 与采样（已实现，<code>chrome/flow/</code>）</h2>
+    <table>
+      <thead><tr><th>项</th><th>约定</th></tr></thead>
+      <tbody>
+        <tr><td>形式</td><td>Rectified flow：<code>x_t = (1−σ)·x0 + σ·ε</code>，目标 <code>v = ε − x0</code></td></tr>
+        <tr><td>σ</td><td><code>σ = s·u / (1 + (s−1)·u)</code>，u ~ Uniform。训练和推理用同一个 shift</td></tr>
+        <tr><td>音频 shift</td><td><code>s = 3</code>（H3 视频是 12）。这不是 CFG，见 <a href="#cfg">§03</a></td></tr>
+        <tr><td>AdaLN 时间</td><td><code>t = 1 − σ</code></td></tr>
+        <tr><td>σ 的粒度</td><td>训练：每条样本一个 σ，左右耳、所有帧共用，文本行的 AdaLN 也用这个 t；同一包里不同样本各抽各的。推理：一步里所有样本同一个 σ</td></tr>
+        <tr><td>干净 / 参考行</td><td>机制预留：<code>clean=True</code> 的行 t 钉 1.0，<code>target=False</code> 的行不进损失。T2A 不产生这种行（§12）</td></tr>
+        <tr><td>时间嵌入</td><td><code>t ∈ [0,1]</code> 直接乘频率进 sin/cos（256 维，最长周期 10⁴），不先乘 1000。与 H3 一致：DiffSynth 的 H3 pipeline 里是 <code>t = 1 − timestep/1000</code></td></tr>
+        <tr><td>损失</td><td>音频行上的速度 MSE：<code>(pred − (ε − x0))²</code>，文本行和 pad 行不算。默认 <code>flow.loss_reduction: token</code></td></tr>
+        <tr><td>采样器</td><td>Euler，η = 0，<strong>推理 50 步</strong>。训练每步只抽一个 σ，不跑这 50 步。<code>preview.sampler</code> / <code>infer.sampler</code> 切换，S4 的少步采样器加在旁边</td></tr>
+        <tr><td>CFG</td><td>训练只有 <code>cfg_drop=0.1</code>（10% 换成空格）；推理才用 <code>cfg_scale=4</code> 做 <code>vu+4(vc−vu)</code>。H3 发布权已蒸馏所以官方 CFG=1；我们从零训，听评必须开 CFG，S4 再蒸</td></tr>
+      </tbody>
+    </table>
+    <p>
+      一个包里时长混合时，默认按<strong>音频行</strong>平均，不是按条平均。
+      每行（一帧、一个声道、32 维）先算 MSE，再 <code>loss = Σ(行 MSE) / 音频行数</code>。
+      15 s 立体声是 <code>15 × 40 × 2 = 1200</code> 行，4 s 是 320 行，所以 15 s 对总 loss 的贡献约是 4 s 的 3.75 倍。
+      算力花在更长的音频上，梯度也按行数给。随机初始化时 loss 大约 1.2–1.3，没有「正确率」含义。
+    </p>
+    <table>
+      <thead><tr><th>字段</th><th>平均方式</th><th>读法</th></tr></thead>
+      <tbody>
+        <tr><td>日志 <code>loss</code></td><td><code>token</code>：所有音频行等权</td><td>长音频权重大，和打包预算一致</td></tr>
+        <tr><td>日志 <code>music=… zhizhou=…</code></td><td>先对每条自己的行取平均，再按条平均</td><td>看这个源「一条有多难」，不受该源平均时长拉动</td></tr>
+        <tr><td><code>flow.loss_reduction=sample</code></td><td>先按条平均，再对条平均</td><td>4 s 和 15 s 权重相同；默认不用</td></tr>
+      </tbody>
+    </table>
+    <p class="dim">
+      H3 开源训练常用另一张 1000 档、s=2.22 的表，不要按「第 k 步」去对噪声水平。
+      Chrome 训练 / 推理都用音频 s=3，避免 AdaLN 学错表。
+    </p>
+  </section>
+
+  <!-- ========== 14 ========== -->
+  <section class="section" id="params">
+    <h2><span class="num">14</span>参数分布：10.82B 花在哪</h2>
+    <p>
+      数字是把 <code>ChromeDiT</code> 按 <code>configs/dit/10b.yaml</code>（text_dim=5120）在 meta device 上实例化后逐个参数数出来的，不是估算。
+      结论：<strong>AdaLN 和 FFN 各占约四成，Attention 不到两成</strong>；冻结的 Qwen（24.4B）和 VAE（0.15B）不算在这 10.82B 里。
+    </p>
+    <div class="bar">
+      <span style="flex:39.24;background:#ff8a4c">AdaLN 4.25B · 39.2%</span>
+      <span style="flex:39.07;background:#6ea8ff">FFN 4.23B · 39.1%</span>
+      <span style="flex:17.36;background:#7cf0c4">Attn 1.88B · 17.4%</span>
+      <span style="flex:4.03;background:#c4a0ff" title="token refiner 0.44B">4%</span>
+      <span style="flex:0.6;background:#94a3b8" title="其它 0.03B"></span>
+    </div>
+    <div class="bar-cap"><span>橙 AdaLN（28 层 + 最终层）</span><span>蓝 FFN</span><span>绿 Attention</span><span>紫 token refiner</span><span>灰 其它</span></div>
+
+    <table>
+      <thead><tr><th>模块</th><th>参数</th><th>占比</th><th>每个 token 都参与吗</th></tr></thead>
+      <tbody>
+        <tr><td>AdaLN：28 层 × <code>Linear(2048 → 73728)</code> + 最终层 <code>Linear(2048 → 8192)</code></td><td>4.230B + 0.017B = <strong>4.247B</strong></td><td><strong>39.24%</strong></td><td>不参与。只对 unique t（每包约 33 个）算一次，再按行查表</td></tr>
+        <tr><td>FFN：28 层 × SwiGLU（fc1 4096→24576，fc2 12288→4096）</td><td>2.819B + 1.409B = <strong>4.228B</strong></td><td><strong>39.07%</strong></td><td>所有行（文本 + 音频）</td></tr>
+        <tr><td>Attention：28 层 × QKV 4096→12288 + out 4096→4096（+ Q/K RMSNorm）</td><td>1.409B + 0.470B = <strong>1.879B</strong></td><td><strong>17.36%</strong></td><td>所有行</td></tr>
+        <tr><td>token refiner：2 个 block（attn + SwiGLU，同宽）+ RMSNorm</td><td>0.436B</td><td>4.03%</td><td>只有文本行</td></tr>
+        <tr><td><code>condition_proj</code> 5120→4096</td><td>0.021B</td><td>0.19%</td><td>只有文本行</td></tr>
+        <tr><td><code>TimeEmbedder</code> 256→4096→2048</td><td>0.009B</td><td>0.09%</td><td>只有 unique t</td></tr>
+        <tr><td>输入/输出投影（audio 32↔4096，video 96↔4096）+ 各层 RMSNorm</td><td>0.001B</td><td>0.01%</td><td>音频行（video 头冻结不用）</td></tr>
+        <tr><td><strong>合计</strong></td><td><strong>10.822B</strong></td><td>100%</td><td></td></tr>
+      </tbody>
+    </table>
+
+    <h3>同一份参数，在四种成本里的占比</h3>
+    <table>
+      <thead><tr><th>部分</th><th>参数量</th><th>训练 FLOP / 步</th><th>训练显存（状态 20 B/参数）</th><th>FSDP 通信 / 步</th></tr></thead>
+      <tbody>
+        <tr><td>主干 Attn + FFN（6.107B）</td><td>56%</td><td><strong>≈ 97%</strong>（线性层；注意力打分另占约 3%）</td><td>56%（122 GB 总 / 15.3 GB 每卡）</td><td>56%</td></tr>
+        <tr><td>AdaLN（4.247B）</td><td>39%</td><td><strong>≈ 0.1%</strong></td><td>39%（85 GB 总 / 10.6 GB 每卡）</td><td>39%</td></tr>
+        <tr><td>refiner + condition_proj（0.457B）</td><td>4%</td><td>≈ 0.5%（文本行只占包的 7%）</td><td>4%</td><td>4%</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li><strong>算力看的是“每个 token 走过多少参数”</strong>：每个音频行前向约 2 × 6.107B ≈ 12.2 GFLOP，加上注意力打分约 0.35 GFLOP（平均每条样本约 770 行）。所以 10B 预设在算力上相当于约 6.5B 的稠密模型。</li>
+      <li><strong>显存、checkpoint、通信看的是参数总数</strong>：训练状态每个参数 20 B（fp32 权重 4 + 梯度 4 + Adam 两份 8 + EMA 4），10.82B × 20 B = 216 GB，8 卡分片后每卡 27.1 GB。checkpoint 173 GB = model 43.3 + ema 43.3 + optimizer 86.6。</li>
+      <li><strong>FSDP 每步通信</strong>：前向和反传各 all-gather 一次 bf16 权重，再 reduce-scatter 一次 fp32 梯度，每参数 8 B，合计约 87 GB 集合通信量，每卡收发约 76 GB。NVLink 上约 0.2 s，基本被计算掩盖。</li>
+      <li><strong>为什么 AdaLN 这么大</strong>：每层输出维 = 3 档模态 × 6 个调制量 × 4096 = 73728，输入维 2048，单层 151M，和一层 FFN（151M）一样大。H3 同比例（13.0B / 33.1B = 39%）。</li>
+    </ul>
+
+    <h3>Audio VAE（已实现，对齐报告）</h3>
+    <table>
+      <thead><tr><th>模块</th><th>参数</th></tr></thead>
+      <tbody>
+        <tr><td>encoder</td><td>73.715M</td></tr>
+        <tr><td>pre_block</td><td>12.668M</td></tr>
+        <tr><td>heads（mean / logs / dec_in）</td><td>0.07M</td></tr>
+        <tr><td>decoder BigVGAN</td><td>64.869M</td></tr>
+        <tr><td><strong>合计</strong></td><td><strong>151.321M</strong></td></tr>
+      </tbody>
+    </table>
+    <p class="dim">整网冻结，不重训。</p>
+
+    <h3>DiT 预设（已实现，规模缩小的 H3）</h3>
+    <table>
+      <thead>
+        <tr><th>预设</th><th>层</th><th>hidden</th><th>头</th><th>FFN</th><th>time_emb</th><th>AdaLN / 层</th><th>AdaLN 合计</th><th>总参</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>tiny</code></td>
+          <td>2</td><td>256</td><td>—</td><td>—</td><td>—</td>
+          <td>—</td><td>—</td>
+          <td>只跑通管线</td>
+        </tr>
+        <tr>
+          <td><code>1b</code></td>
+          <td>24</td><td>1536</td><td>12×128</td><td>4608</td><td>768</td>
+          <td>Linear(768→27648) ≈ 21.26M</td>
+          <td>0.513B（39%）</td>
+          <td><strong>1.320B</strong></td>
+        </tr>
+        <tr>
+          <td><code>10b</code></td>
+          <td>28</td><td>4096</td><td>32×128</td><td>12288</td><td>2048</td>
+          <td>Linear(2048→73728) ≈ 151.1M</td>
+          <td><strong>4.247B</strong>（39%）</td>
+          <td><strong>10.822B</strong></td>
+        </tr>
+        <tr>
+          <td>H3 参考</td>
+          <td>50</td><td>5376</td><td>56×128</td><td>14336</td><td>2688</td>
+          <td>Linear(2688→96768)</td>
+          <td>13.039B（39%）</td>
+          <td>33.123B</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      AdaLN 参数 = <code>time_emb × hidden × 18</code>（加 bias 再 ×18）。
+      它随 time_emb 和 hidden 同时涨，所以 10B 里 AdaLN 占比和 H3 接近。
+      算力上 AdaLN 只跑 unique t（U≪S）；贵的是全量训练时 Adam 状态，不是前向 GEMM。
+    </p>
+    <p class="dim">
+      数字是用 DiffSynth 的 <code>MiniMaxH3DiT</code> 按各预设在 meta device 上实例化数出来的（AdaLN 含最终层），H3 一行与官方 33B 对得上。
+      <code>text_dim</code> 从 5120 换到 2560 只差几 M，文本编码器选多大不影响 DiT 规模。
+    </p>
+    <div class="callout warn">
+      <div class="title">S2 要消融：AdaLN 占四成</div>
+      <p style="margin:0">
+        10B 预设每个 token 实际参与计算的只有主干 6.11B + refiner 0.44B，算力上相当于约 6.5B 的稠密模型；
+        4.25B 的 AdaLN 前向几乎不花算力，但训练状态（权重 + 梯度 + Adam + EMA）要存约 85 GB，还占 39% 的 checkpoint 和 FSDP 通信。
+        H3 的模态特异参数主要放在 AdaLN，所以不能直接砍；
+        在 1B 上对比「每层每模态独立 AdaLN」和共享式（adaLN-single 一类），省下的参数是否该挪去加深主干，S2 定。
+      </p>
+    </div>
+
+    <h3>冻结部分（不计入 10.82B）</h3>
+    <table>
+      <thead><tr><th>模块</th><th>参数</th><th>bf16 / fp32 大小</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>Qwen3-VL-32B 前 50 层</td><td>约 24.4B</td><td>48.8 GB（bf16）</td><td>本地完整权重 64 层 + 视觉塔 + lm_head 共 66.7 GB，只读 50 层，见 §09</td></tr>
+        <tr><td>Audio VAE</td><td>0.151B</td><td>0.6 GB（fp32）</td><td>训练只用编码器，推理只用解码器</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ========== 15 ========== -->
+  <section class="section" id="cost">
+    <h2><span class="num">15</span>显存与耗时剖析：训练 vs 推理</h2>
+    <p>
+      训练的总数（92.8 GB、5.6 s/步、各阶段秒数）来自 <code>log.jsonl</code> 实测，各项拆分按代码推算，加起来和实测对得上。
+      推理没能实测（8 张卡都在训练），全部是按代码和 FLOP 推的<strong>估算</strong>，量级可信，具体秒数以实测为准。
+    </p>
+
+    <h3>1. 训练显存：每卡 92.8 GB 怎么分</h3>
+    <div class="bar">
+      <span style="flex:48.8;background:#c4a0ff">Qwen 48.8 GB</span>
+      <span style="flex:27.1;background:#ff8a4c">DiT 分片状态 27.1</span>
+      <span style="flex:13;background:#6ea8ff">激活 ~13</span>
+      <span style="flex:4;background:#7cf0c4" title="VAE + FSDP 缓冲 + 杂项">~4</span>
+    </div>
+    <div class="bar-cap"><span>紫 Qwen（首次 cache miss 后常驻）</span><span>橙 权重/梯度/Adam/EMA 的 1/8</span><span>蓝 激活（重算）</span><span>绿 VAE + all-gather 缓冲</span></div>
+    <table>
+      <thead><tr><th>项</th><th>每卡大小</th><th>怎么算的</th><th>能不能省</th></tr></thead>
+      <tbody>
+        <tr><td>Qwen3-VL-32B 前 50 层 bf16</td><td><strong>48.8 GB</strong></td><td>24.4B × 2 B。该 rank 第一次 cache miss 时加载，进程结束前不释放</td><td>能：缓存全命中就不加载（§04 末尾）</td></tr>
+        <tr><td>DiT fp32 权重分片</td><td>5.4 GB</td><td>10.82B × 4 B / 8</td><td rowspan="4">FSDP 已经分片；再省要上 8 卡以上分片或 8-bit Adam</td></tr>
+        <tr><td>梯度分片 fp32</td><td>5.4 GB</td><td>同上</td></tr>
+        <tr><td>Adam 的 m、v</td><td>10.8 GB</td><td>2 × 5.4</td></tr>
+        <tr><td>EMA 分片 fp32</td><td>5.4 GB</td><td>同上</td></tr>
+        <tr><td>FSDP all-gather 缓冲 bf16</td><td>约 1.5 GB</td><td>一个 block 369M × 2 B = 0.74 GB，当前块 + 预取块</td><td>—</td></tr>
+        <tr><td>激活：28 个 block 的输入</td><td>5.7 GB</td><td>24.8k 行 × 4096 × 2 B × 28。激活重算只存每块的输入</td><td>和 <code>max_tokens</code> 成正比</td></tr>
+        <tr><td>激活：反传时正在重算的那一块</td><td>约 5–7 GB</td><td>fc1 输出 24.8k × 24576 × 2 B = 1.2 GB，加 QKV、SwiGLU 中间量、6 组 <code>[S, 4096]</code> 的 AdaLN 调制，以及它们的梯度</td><td>关重算会 OOM</td></tr>
+        <tr><td>VAE 权重 + 编码中间量</td><td>0.6 GB + 瞬时几 GB</td><td>编码器第一层是 64 通道 × 32 kHz，同长度片段一起编码；<code>no_grad</code>，编完就释放</td><td>latent 缓存后为 0</td></tr>
+        <tr><td><strong>合计（推算）</strong></td><td><strong>约 88–94 GB</strong></td><td colspan="2">和日志 <code>mem_gb=92.8</code>（<code>max_memory_allocated</code>）吻合。nvidia-smi 显示 101–125 GB，多出的是 PyTorch 缓存池、CUDA context 和 NCCL 缓冲</td></tr>
+      </tbody>
+    </table>
+    <p class="dim">不加载 Qwen 时，24.8k 配方约 40–45 GB；16k 干跑实测 34.8 GB。</p>
+
+    <h3>2. 训练耗时：5.6 s 一步花在哪（实测）</h3>
+    <div class="bar">
+      <span style="flex:3.64;background:#ff8a4c">DiT 3.64 s · 65%</span>
+      <span style="flex:1.35;background:#7cf0c4">VAE 1.35 s · 24%</span>
+      <span style="flex:0.56;background:#c4a0ff">Qwen 0.56 · 10%</span>
+      <span style="flex:0.05;background:#94a3b8"></span>
+    </div>
+    <div class="bar-cap"><span>step 24040–24060 的稳态值（<code>model_s / vae_s / text_s</code>）</span><span>val / preview / ckpt 另算</span></div>
+    <table>
+      <thead><tr><th>阶段</th><th>时间</th><th>占比</th><th>里面在干什么</th><th>怎么省</th></tr></thead>
+      <tbody>
+        <tr><td>DiT 前向 + 反传 + 重算 + AdamW + FSDP 通信</td><td>3.64 s</td><td>65%</td>
+          <td>每卡一个包约 24.2k 行，前向约 306 TFLOP；实际要跑 1 次前向 + 1 次重算 + 反传（约 2 倍前向），约 1.2 PFLOP。按“3 倍前向”口径约 250 TFLOPS/卡，MFU 约 25%</td>
+          <td>已经是大头；可以试选择性重算、FP8</td></tr>
+        <tr><td>VAE 在线编码</td><td>1.35 s</td><td>24%</td><td>每卡约 281 s 立体声；fp32，关 TF32（保证和 H3 对齐），串在 DiT 前面</td><td>latent 缓存，或放到另一个 CUDA stream 和 DiT 重叠。约快 1.3 倍</td></tr>
+        <tr><td>Qwen 在线编码 + 写缓存</td><td>0.56 s</td><td>10%</td><td>约 29 条 × 56 token ≈ 1.6k token × 49 GFLOP ≈ 79 TFLOP，加写 29 个 safetensors 文件</td><td>缓存命中后降到约 7 ms</td></tr>
+        <tr><td>pack</td><td>5 ms</td><td>0.1%</td><td>CPU 上建 tags / RoPE 坐标 / cu_seqlens</td><td>—</td></tr>
+        <tr><td>DataLoader 等待</td><td>&lt; 1 ms</td><td>≈ 0</td><td>12 个 worker 已预取</td><td>—</td></tr>
+      </tbody>
+    </table>
+
+    <h3>3. 推理显存（估算：单卡，B=8 条 × 10 s，CFG 4）</h3>
+    <div class="bar">
+      <span style="flex:43.3;background:#ff8a4c">DiT fp32 43.3 GB</span>
+      <span style="flex:21.6;background:#ffc857">autocast 缓存 21.6</span>
+      <span style="flex:48.8;background:#c4a0ff">Qwen 48.8（有新 caption 时）</span>
+      <span style="flex:3;background:#7cf0c4" title="激活 + VAE">~3</span>
+    </div>
+    <div class="bar-cap"><span>峰值约 117 GB（有新 caption）</span><span>约 68 GB（caption 全在缓存里）</span></div>
+    <table>
+      <thead><tr><th>项</th><th>大小</th><th>为什么</th></tr></thead>
+      <tbody>
+        <tr><td>DiT 权重 fp32，常驻</td><td><strong>43.3 GB</strong></td><td><code>T2APipeline.from_run</code> 在 meta 上建模型，<code>to_empty</code> 按默认 fp32 物化，再读 fp32 的 <code>ema.safetensors</code>。没有转 bf16</td></tr>
+        <tr><td>autocast 的 bf16 权重缓存，每步瞬时</td><td><strong>最多 21.6 GB</strong></td><td>参数的 <code>requires_grad</code> 仍是 True，autocast 会把每个权重的 bf16 副本缓存到退出 autocast（每步末）才释放。已用 4 层 Linear 实测：<code>requires_grad=True</code> 时多占 160 MiB，False 时为 0</td></tr>
+        <tr><td>Qwen3-VL-32B 前 50 层</td><td><strong>48.8 GB 或 0</strong></td><td>只要有一条 caption 不在 <code>outputs/text_cache</code> 里就加载，而且不释放。训练中已经见过的 caption、preview 集和 <code>" "</code> 在缓存里，新写的 prompt 一般都会触发加载</td></tr>
+        <tr><td>激活</td><td>1–3 GB</td><td>序列约 2 × 8 × (800 + 60) ≈ 13.8k 行；<code>no_grad</code> 下每层算完即丢，最大的是 fc1 输出 13.8k × 24576 × 2 B ≈ 0.7 GB</td></tr>
+        <tr><td>VAE</td><td>0.6 GB + 不到 1 GB</td><td>逐条解码，BigVGAN 的中间量很小</td></tr>
+      </tbody>
+    </table>
+    <div class="callout good">
+      <div class="title">三处小改可以把推理峰值从约 117 GB 压到约 25 GB（代码还没改）</div>
+      <ul style="margin-bottom:0">
+        <li>DiT 加载后 <code>requires_grad_(False)</code>：去掉 21.6 GB 的 autocast 缓存。</li>
+        <li>再整体转 bf16：常驻从 43.3 GB 降到 21.6 GB。RoPE 和时间嵌入内部本来就用 fp32 算，不受影响。</li>
+        <li>文本编码完就释放 Qwen，或者推理前先用 <code>cache_text.sh</code> 把 prompt 编进缓存：去掉 48.8 GB。</li>
+      </ul>
+    </div>
+
+    <h3>4. 推理耗时（估算）</h3>
+    <p>
+      DiT 每步的 FLOP ≈ 行数 × 12.6 GFLOP，行数 = <code>(1 + 是否开 CFG) × Σ(L + 80·秒)</code>。
+      所以耗时 ∝ 步数 × CFG 倍数 × 总音频秒数。
+    </p>
+    <table>
+      <thead><tr><th>阶段</th><th>计算 / 数据量</th><th>估计时间</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>冷启动：读 DiT 权重</td><td>43.3 GB</td><td>取决于存储，几十秒到几分钟</td><td>每起一次 infer 进程读一次</td></tr>
+        <tr><td>冷启动：读 Qwen 50 层</td><td>48.8 GB</td><td>同上</td><td>只在有新 caption 时；日志 <code>[text] ... in Ns</code> 会打印</td></tr>
+        <tr><td>Qwen 编码</td><td>每条约 2 × 24.4B × L ≈ 3 TFLOP（L≈60）</td><td>毫秒到亚秒级</td><td>每条只算一次，不随步数增加</td></tr>
+        <tr><td><strong>DiT 采样</strong></td><td>B=1、10 s：50 × 1720 行 × 12.6 GFLOP ≈ 1.1 PFLOP<br>B=8：约 8.7 PFLOP</td><td><strong>B=1 约 4–6 s<br>B=8 约 22–30 s</strong></td><td>按 200–400 TFLOPS 有效算力估；小 batch 的矩阵偏小，利用率更低。占稳态计算 95% 以上</td></tr>
+        <tr><td>VAE 解码</td><td>约 1 TFLOP / 10 s 立体声</td><td>约 0.1–1 s / 条</td><td>逐条串行，大部分算力在 BigVGAN 的前几级上采样</td></tr>
+      </tbody>
+    </table>
+    <p class="dim">
+      提速方向按收益排序：S4 少步蒸馏（50 → 4–8 步）&gt; CFG 蒸馏（行数减半）&gt; 一个进程里批量出多条（摊掉冷启动）&gt; 缓存 refiner 输出（文本行占比小，收益有限）。
+    </p>
+  </section>
+
+  <!-- ========== 16 ========== -->
+  <section class="section" id="efficiency">
+    <h2><span class="num">16</span>这次 8 卡 10B 的训练效率</h2>
+    <p>
+      口径来自正在跑的 <code>outputs/train/t2a_10b</code>：配置是启动时写入的 <code>config.yaml</code>，
+      步时 / 显存 / 条数来自 <code>log.jsonl</code>（截至 step 24060，val 0.272 @ step 24000），机器状态来自当时的 <code>nvidia-smi</code>。
+      机器是 8×NVIDIA H200 141 GB（驱动 570 / CUDA 12.8）。
+    </p>
+
+    <div class="kpi">
+      <div class="item"><div class="n">5.60 s</div><div class="l">稳态中位步时</div></div>
+      <div class="item"><div class="n">31.6</div><div class="l">clips / 卡 / 步</div></div>
+      <div class="item"><div class="n">253</div><div class="l">clips / 8 卡 / 步</div></div>
+      <div class="item"><div class="n">281 s</div><div class="l">音频 / 卡 / 步</div></div>
+      <div class="item"><div class="n">~9200 h</div><div class="l">24h 墙钟过的音频</div></div>
+      <div class="item"><div class="n">92.8 G</div><div class="l">PyTorch allocated</div></div>
+    </div>
+
+    <h3>1. 这次配方（和 16k 干跑对比）</h3>
+    <table>
+      <thead><tr><th>项</th><th>开训前段 16k</th><th>当前 24.8k（这次）</th><th>从哪来</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>配置</td>
+          <td><code>max_tokens=16384</code></td>
+          <td><code>data.loader.max_tokens=24840</code></td>
+          <td><code>configs/data/t2a_base.yaml</code> → 被 t2a_10b 继承</td>
+        </tr>
+        <tr>
+          <td>并行</td>
+          <td colspan="2">FSDP2 · <code>shard_size: null</code> · 激活重算 · bf16 计算 / fp32 主权重</td>
+          <td><code>train.parallel.kind=fsdp</code></td>
+        </tr>
+        <tr>
+          <td>fill / clips/rank</td>
+          <td>0.967 / 20.7</td>
+          <td>0.976 / 31.6</td>
+          <td>日志均值</td>
+        </tr>
+        <tr>
+          <td>一步全局 batch</td>
+          <td>~165 条</td>
+          <td>~253 条</td>
+          <td>8 个独立包相加，<code>grad_accum=1</code></td>
+        </tr>
+        <tr>
+          <td>步时拆分</td>
+          <td>3.76 s（data 0 / cond 1.25 = VAE 0.89 + text 0.35 / model 2.46）</td>
+          <td>5.60 s 中位（cond 1.91 = VAE 1.35 + text 0.56 / model 3.64）</td>
+          <td>pack 都只有 ~5 ms，可忽略</td>
+        </tr>
+        <tr>
+          <td>allocated 峰值</td>
+          <td>82 GB</td>
+          <td>92.8 GB</td>
+          <td>日志 <code>mem_gb</code></td>
+        </tr>
+        <tr>
+          <td>token / 秒 / 卡</td>
+          <td>~4200</td>
+          <td>~4210</td>
+          <td>加大 packing 几乎不加快，只加大一步的 batch</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="callout">
+      <div class="title">一步里时间花在哪（当前 24.8k）</div>
+      <p style="margin:0">
+        model 65%（DiT 前向 + 反传 + Adam + 分片通信）·
+        VAE 24%（冻结编码器，按长度分组，串在 DiT 前面）·
+        文本 10%（每步约 29 条 caption 未命中缓存，现场跑 Qwen 再写盘）·
+        DataLoader &lt;0.1%。
+        和 1B 那次不同：10B 已经是模型算力为主，但在线 VAE 仍吃掉约四分之一墙钟。逐项拆解见 <a href="#cost">§15</a>。
+      </p>
+    </div>
+
+    <h3>2. 24 小时能过多少小时音频</h3>
+    <p>
+      音频秒数不是「条数 × 15 s」。打包代价 = <code>80 × 秒 + caption tokens</code>，
+      混合后平均 clip 约 <strong>8.96 s</strong>（zhizhou 偏短、语音权重大），caption 约 56 tok。
+      每卡 used ≈ 0.976 × 24840 ≈ 24240 行，扣掉文本后约 22500 音频行 → <strong>每卡每步 ~281 s 音频</strong>。
+    </p>
+    <table>
+      <thead><tr><th>口径</th><th>算法</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>纯训练步进</td>
+          <td>8 × 281 s / 5.60 s</td>
+          <td>约 <strong>401 小时音频 / 训练 1 小时</strong>；24h → ~9620 小时</td>
+        </tr>
+        <tr>
+          <td>计入 val / preview / ckpt</td>
+          <td>每 1000 步 val+听评约 1 min；每 2000 步写 173 GB 约 5 min。墙钟约 98 min / 1000 步</td>
+          <td>约 <strong>1.47 万步 / 24h</strong> → <strong>~9200 小时音频</strong></td>
+        </tr>
+        <tr>
+          <td>条数</td>
+          <td>253 clips/步 × 14700 步</td>
+          <td>约 <strong>370 万条 / 天</strong>，相对 10.1M 训练行 ≈ <strong>0.37 epoch / 天</strong></td>
+        </tr>
+        <tr>
+          <td>跑满 <code>max_steps=100000</code></td>
+          <td>100000 / 14700 × 24h</td>
+          <td>约 <strong>6.8 天墙钟</strong>，约 2.5 个 epoch、9.2 万小时音频曝光</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="callout good">
+      <div class="title">一句话</div>
+      <p style="margin:0">
+        这台 8×H200 按当前 24.8k 配方，<strong>一天大约过 9200 小时（约 1.05 年）的立体声训练音频</strong>。
+        训练池本身 cap 之后是 25,128 小时 / 10.1M 条，一天能扫过约三分之一。
+      </p>
+    </div>
+
+    <h3>3. 数据池和一步里各源占比</h3>
+    <p>
+      混合权重是 <code>max_records</code>（不是旧 VR-Foley 的 <code>weight</code> 字段）：
+      music 0.9M / FreeSound 0.35M / AudioSet 0.35M / HiFiTTS-2 3.5M / zhizhou 5.0M。
+    </p>
+    <table>
+      <thead><tr><th>源</th><th>训练行</th><th>clip 小时</th><th>均值秒</th><th>条数占比</th><th>时长占比</th></tr></thead>
+      <tbody>
+        <tr><td>music</td><td>900,000</td><td>2,498</td><td>9.99</td><td>8.9%</td><td>9.9%</td></tr>
+        <tr><td>freesound</td><td>350,000</td><td>971</td><td>9.99</td><td>3.5%</td><td>3.9%</td></tr>
+        <tr><td>audioset</td><td>350,000</td><td>970</td><td>9.97</td><td>3.5%</td><td>3.9%</td></tr>
+        <tr><td>hifitts2</td><td>3,500,000</td><td>9,573</td><td>9.85</td><td>34.7%</td><td>38.1%</td></tr>
+        <tr><td>zhizhou</td><td>5,000,000</td><td>11,116</td><td>8.00</td><td>49.5%</td><td>44.2%</td></tr>
+        <tr><td><strong>合计</strong></td><td><strong>10,100,000</strong></td><td><strong>25,128</strong></td><td>8.96</td><td>100%</td><td>100%</td></tr>
+      </tbody>
+    </table>
+    <p class="dim">
+      zhizhou 全是 16 kHz，升到 32 kHz 后 8 kHz 以上没有能量，却占 44% 时长。S2 消融里要看配比；这次 10B 仍按该配比在训。
+    </p>
+
+    <h3>4. 资源占用（8×H200）</h3>
+    <p>nvidia-smi 瞬时（训练稳态、8 个 python rank）：</p>
+    <table>
+      <thead><tr><th>卡</th><th>已用 / 141 GB</th><th>GPU-Util</th><th>功耗 / 700 W</th><th>温度</th></tr></thead>
+      <tbody>
+        <tr><td>0</td><td>105 GB</td><td>93–98%</td><td>~630 W</td><td>69°C</td></tr>
+        <tr><td>1</td><td>101 GB</td><td>97–100%</td><td>~600 W</td><td>60°C</td></tr>
+        <tr><td>2</td><td>121 GB</td><td>99–100%</td><td>~600 W</td><td>58°C</td></tr>
+        <tr><td>3</td><td>102 GB</td><td>96–100%</td><td>~640 W</td><td>69°C</td></tr>
+        <tr><td>4</td><td>122 GB</td><td>94–99%</td><td>~650 W</td><td>71°C</td></tr>
+        <tr><td>5</td><td>104 GB</td><td>99–100%</td><td>~610 W</td><td>64°C</td></tr>
+        <tr><td>6</td><td>122 GB</td><td>95–100%</td><td>~625 W</td><td>68°C</td></tr>
+        <tr><td>7</td><td>122 GB</td><td>94–99%</td><td>~635 W</td><td>63°C</td></tr>
+      </tbody>
+    </table>
+    <div class="mem-bar" title="一张卡 141 GB 怎么分">
+      <span style="flex:48.8;background:#c4a0ff">Qwen 48.8G</span>
+      <span style="flex:27.1;background:#ff8a4c">DiT 分片状态 27.1G</span>
+      <span style="flex:17;background:#7cf0c4">激活 + VAE ~17G</span>
+      <span style="flex:15;background:#6ea8ff">缓存池 / NCCL</span>
+      <span style="flex:27;background:rgba(148,163,184,.35);color:#e8eefc">空 16–38G</span>
+    </div>
+    <p class="dim">
+      前三段加起来约 92.8 GB（PyTorch <code>max_memory_allocated</code>），拆分见 <a href="#cost">§15</a>；nvidia-smi 的 101–125 GB 还包括缓存池和 NCCL 缓冲，各卡参差。
+      空闲大约 16–38 GB，再加 <code>max_tokens</code> 或关掉激活重算都会 OOM。
+    </p>
+    <table>
+      <thead><tr><th>资源</th><th>占用</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>GPU 算力</td>
+          <td>94–100% util；model 段约 250 TFLOPS/卡</td>
+          <td>H200 BF16 峰值 989.5 TFLOPS → 不计重算约 25% MFU；激活重算大约再翻一倍实际 FLOP</td>
+        </tr>
+        <tr>
+          <td>整机功耗</td>
+          <td>8 × ~625 W ≈ <strong>5.0 kW</strong></td>
+          <td>24h ≈ 120 kWh；功耗已经顶到 700 W 帽的 85–93%</td>
+        </tr>
+        <tr>
+          <td>CPU / 读盘</td>
+          <td>12 worker × 8 rank，prefetch 4</td>
+          <td><code>data_s≈0.8 ms</code>，不是瓶颈。文本 0.56 s 主要是 Qwen 在线编码，不是读盘</td>
+        </tr>
+        <tr>
+          <td>Checkpoint</td>
+          <td><strong>173 GB / 份</strong>：model 43.3 + ema 43.3 + optimizer 86.6</td>
+          <td><code>save_sharded=false</code>，<code>keep_ckpts=1</code>。写盘约 5 min，每 2000 步一次</td>
+        </tr>
+        <tr>
+          <td>Val / Preview</td>
+          <td>每 1000 步</td>
+          <td>val 打完全部 holdout（5×256，<code>val_batches=0</code>）；preview 18 条 Euler 50 + CFG 4，EMA 权重</td>
+        </tr>
+        <tr>
+          <td>Loss 轨迹</td>
+          <td>train 1.27 → 0.26；val 0.31 → 0.27（step 23k）</td>
+          <td>按源：freesound 最低，music / audioset 仍明显高于语音</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>5. 还能量多少</h3>
+    <ul>
+      <li><strong>不要在 Qwen 常驻时再加 max_tokens</strong>：24.8k 已经把 allocated 顶到 93 GB、个别 rank nvidia-smi 122 GB / 141 GB。</li>
+      <li><strong>最快的加速</strong>仍是把 VAE 移出关键路径（latent 缓存，或另一个 CUDA stream 和 DiT 重叠）。当前 1.35 s / 5.60 s ≈ 24%；拿掉后步时大约 4.3 s，24h 音频能到 ~1.2 万小时。</li>
+      <li><strong>Qwen 下线</strong>：文本 0.56 s 和每卡 48.8 GB 都来自缓存未命中时的在线 Qwen。第一个 epoch（约 4 万步）跑完后重启，或者另找空卡用 <code>cache_text.sh</code> 把剩下的 caption 预填完，再重启训练，Qwen 就不再加载。省下的显存可以加 <code>max_tokens</code>，但要另开 run（会改变封包）。</li>
+      <li>多机：<code>NNODES=N shard_size=8</code> 做 HSDP。一步全局 batch 按节点数线性放大，单卡步时几乎不变，24h 音频按节点数倍增。</li>
+    </ul>
+
+    <h3>可执行命令</h3>
+<pre># 这次 10B：单机 8 卡 FSDP，续训当前 run
+cd /mnt/data04/480634/728342682@qq.com/1_CODE/AUDIO/PreTrain/Chrome-10B
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 NPROC=8 \
+  bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml
+
+# 新开一次（目录带时间戳）
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 NPROC=8 \
+  bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml train.resume=null
+
+# 看吞吐、loss、显存（log.jsonl 每 20 步一条）
+tail -f outputs/train/t2a_10b/log.jsonl
+
+# TensorBoard：loss / 步时 / preview wav
+bash scripts/train/tensorboard.sh outputs/train/t2a_10b
+
+# 听评
+ls outputs/train/t2a_10b/samples/step_0023000/
+
+# 推理（读最新 EMA）
+CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b \
+  'infer.prompts=["Heavy rain on a tin roof."]'
+
+# 多机示例（每台各跑一次）
+NNODES=4 NODE_RANK=0 MASTER_ADDR=&lt;node0&gt; \
+  bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml train.parallel.shard_size=8
+</pre>
+  </section>
+
+  <!-- ========== 17 ========== -->
+  <section class="section" id="train">
+    <h2><span class="num">17</span>S2 训练框架（已实现）</h2>
+    <p>
+      分四层，每层只经一个接口和别的层打交道，扩展时只动一层。
+      采样器（<code>chrome/flow/sampler.py</code>）、文本编码器（<code>chrome/text/</code>）、推理（<code>chrome/pipeline/t2a.py</code>）各自独立。
+      训练 / 推理配置项的含义、默认值和这次 10B 的取值见 <a href="#hparams">§18</a>。
+    </p>
+    <table>
+      <thead><tr><th>层</th><th>位置</th><th>管什么</th><th>扩展方式</th></tr></thead>
+      <tbody>
+        <tr><td>Task</td><td><code>chrome/tasks/</code></td><td>数据、条件怎么来（VAE / 文本 / packing）、loss、preview 渲染什么</td><td><code>@register_task</code>，<code>task.kind</code>；S4 蒸馏、S5 视频各加一个</td></tr>
+        <tr><td>Layout</td><td><code>chrome/dit/layout.py</code></td><td>一条样本往 packed 序列里放哪些段</td><td><code>@register_layout</code>，<code>layout.kind</code>；S5 加视频段，packer 和 DiT 不动</td></tr>
+        <tr><td>Parallel</td><td><code>chrome/train/parallel.py</code></td><td>模型怎么物化、初始化、包装，梯度怎么同步</td><td><code>train.parallel.kind</code>：<code>ddp</code> / <code>fsdp</code>（设了 <code>shard_size</code> 就是 HSDP）</td></tr>
+        <tr><td>Trainer</td><td><code>chrome/train/trainer.py</code></td><td>优化器、LR、EMA、梯度累积、日志、验证、preview、checkpoint、续训</td><td>与任务无关，一般不用改</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <code>Task</code> 要实现：<code>build_model</code>（在 meta device 上调用，冻结的部分在这里冻结）、<code>init_model</code>、
+      <code>train_loader(rank, world, state)</code>、<code>val_loader</code>、<code>prepare(batch)</code>（模型输入、样本数、填充率、各阶段耗时）、
+      <code>loss(model, inputs, generators)</code>（总 loss、每样本 loss、按组 loss）。
+      可选：<code>grad_groups</code>、<code>preview_items</code>、<code>preview</code>。latent 缓存以后只改 <code>T2ATask.prepare</code>。
+    </p>
+<pre># 一步（每个 rank，grad_accum 个 micro-batch）
+batch    = next(iter(loader))   # loader = task.train_loader(rank, world, state)：waves + caption ids + batch_id
+prepared = task.prepare(batch)                            # VAE 编码 → 文本缓存 → layout.pack
+with parallel.accumulate(model, sync=last_micro):
+    out = task.loss(model, prepared.inputs, generators)   # rectified flow，v = ε − x0
+    out.loss.backward()
+parallel.clip_grad_norm → optimizer.step → ema.update
+</pre>
+
+    <h3>模型构建与 FSDP2</h3>
+    <ul>
+      <li>在 meta device 上建模型（10B 约 1 s，不占内存）→ <code>parallel.setup</code> 先分片，再 <code>to_empty</code> 物化，再用同一种子调用 <code>init_weights</code>。<code>init_weights</code> 覆盖所有参数和 buffer，能处理 DTensor；meta 上初始化和直接在设备上初始化结果相同（有单测）。</li>
+      <li><code>fully_shard</code>：每个 refiner block 和主干 block 各是一个分片单元，root 最后分片。fp32 主权重 / 梯度 / Adam 状态按分片存，bf16 计算，fp32 reduce。</li>
+      <li><code>cast_forward_inputs=False</code>：RoPE 位置是 fp64、时间步要全精度。</li>
+      <li>root 也设 <code>reshard_after_forward=True</code>；验证、preview、EMA 换权重前后显式 <code>parallel.reshard()</code>。</li>
+      <li>所有 rank 前向次数必须一样：验证 batch 少的 rank 补跑重复前向；preview 平均分到各 rank，不够的用最后一条补齐。</li>
+      <li>EMA 只存本 rank 的分片（fp32），存盘时包成 DTensor；preview 用 <code>ema.swapped()</code>。</li>
+      <li>HSDP：<code>shard_size=S</code> 时建 <code>("replicate","shard")</code> 二维 mesh。多机设成 8：机内分片、机间复制。</li>
+      <li>DDP 设 <code>broadcast_buffers=False</code>，验证和 preview 走未包装的模型。</li>
+    </ul>
+
+    <h3>Checkpoint 格式</h3>
+<pre>&lt;run_dir&gt;/config.yaml  log.jsonl  samples/step_*/
+&lt;run_dir&gt;/checkpoints/latest                      最新一个完整的 step 目录名
+&lt;run_dir&gt;/checkpoints/step_0001000/
+    state/            torch.distributed.checkpoint（DCP）：model、ema（完整 state，含 buffer）、optimizer
+    trainer.pt        scheduler、step、dit 配置、并行方式、world size（rank 0 最后写，有它才算完整）
+    data_rank*.pt     每个 rank 的 sampler 状态
+    ema.safetensors   可选：train.export=ema 或 export_t2a.sh 导出的单文件 fp32 权重
+</pre>
+    <p>
+      DCP 加载时自动重新分片：换卡数、DDP 和 FSDP 互换都能续训。单进程推理直接读 <code>state/</code>，不必先导出。
+      <code>train.init_from</code> 只拿权重开新 run（run 目录、step 目录或 .safetensors 文件）。
+    </p>
+
+    <h3>日志</h3>
+    <p>
+      每 <code>log_every</code> 步（各 rank 平均）：loss（总体按音频行，每个源按条，见 §13）、LR、梯度范数（总的和 <code>condition_proj</code> / <code>adaln</code> 分组）、
+      每步秒数拆成 <code>data</code> / <code>cond</code>（<code>vae</code> / <code>text</code> / <code>pack</code>）/ <code>model</code>、每 rank 条数、填充率、显存峰值。
+      <code>clips/rank</code> 是单卡条数，<code>fill</code> 是相对单卡 <code>max_tokens</code> 的有效行占比（不满封包，见 §06）。
+      <code>log.jsonl</code> 每条带 <code>batch_id</code>，续训前后可逐条对照。
+    </p>
+
+    <h3>实测</h3>
+    <p>
+      条件阶段几乎全是 audio VAE + 文本 disk cache。packing ~5 ms。
+      S2 干跑（2026-10-13，16k）和这次 S3 预训练（2026-10-14 起，24.8k）数字不同，完整效率见 <a href="#efficiency">§16</a>。
+    </p>
+    <table>
+      <thead><tr><th>跑法</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr><td>tiny，500 条，DDP 8 卡，600 步</td><td>train loss 1.26 → 0.33，val 0.39</td></tr>
+        <tr><td>端到端检查（约 200 s）</td><td>同一份初始权重下 DDP 与 FSDP 每步 loss 相对差最大 4.4e-4，val 7e-5；FSDP 第 10 步中断后续训，batch 完全相同，loss 相对差 2.1e-5；HSDP 2×2 和 <code>text_norm=stats</code> 能训；<code>state/</code> 推理与导出权重推理逐位相同</td></tr>
+        <tr><td>1.32B，FSDP 8 卡，16k token/卡</td><td>显存峰值 9.3 GB；稳定 1.57 s/步（model 0.62 s + VAE 0.90 s，VAE 占 57%）；20 步 loss 1.23 → 0.53，val 0.53；checkpoint 写 7 s</td></tr>
+        <tr><td>10.82B 干跑，16k，激活重算</td><td>allocated 34.8 GB（文本全命中、Qwen 未加载）；3.4 s/步（model 2.4 + VAE 0.93）；~21 条/卡</td></tr>
+        <tr><td><strong>这次 10.82B 预训练，24.8k</strong></td><td>allocated 92.8 GB（其中 Qwen 48.8 GB，因缓存命中率约 10%）；稳态 5.6 s/步（model 3.64 + VAE 1.35 + Qwen 在线编码 0.56）；31.6 条/卡；ckpt 173 GB / ~5 min；train 1.27 → 0.26 @23k 步</td></tr>
+        <tr><td>10.82B，关激活重算</td><td>OOM，保持 <code>gradient_checkpointing: true</code></td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn">
+      <div class="title">最划算的优化：把 VAE 从关键路径拿掉</div>
+      <p style="margin:0">
+        10B 的 model 部分约 250 TFLOPS/卡（不算重算）。在线 VAE 串行占这次步时的 24%、1B 的 57%；
+        latent 缓存，或把 VAE 编码放到另一个 stream 和 DiT 重叠，这次 10B 约快 1.3 倍。接口点是 <code>T2ATask.prepare</code>。
+      </p>
+    </div>
+  </section>
+
+  <!-- ========== 18 ========== -->
+  <section class="section" id="hparams">
+    <h2><span class="num">18</span>训练 / 推理参数速查</h2>
+    <p>
+      默认写在 <code>configs/train/t2a_base.yaml</code> + <code>configs/data/t2a_base.yaml</code>。
+      这次 10B 的覆盖在 <code>configs/train/t2a_10b.yaml</code>。命令行 <code>train.val_every=1000</code> 这种写法可以临时改，不改文件。
+      正在跑的进程只在<strong>启动时</strong>读配置；改 yaml 要停掉再续训才生效。
+    </p>
+
+    <h3>1. 打包与一步有多大（单卡）</h3>
+    <p>细节和临界超限不截断见 <a href="#data">§06</a>。</p>
+    <table>
+      <thead><tr><th>键</th><th>默认</th><th>这次 10B</th><th>含义</th></tr></thead>
+      <tbody>
+        <tr><td><code>data.loader.max_tokens</code></td><td>24840</td><td><strong>24840</strong></td><td><strong>单卡</strong>一个 packed 序列的行数上限。8 卡一步 = 8 个独立包。代价 = <code>80 × 秒 + caption tokens</code></td></tr>
+        <tr><td><code>data.loader.max_samples</code></td><td>64</td><td>同左</td><td>单卡条数上限；24.8k 时大约 32 条，几乎碰不到</td></tr>
+        <tr><td><code>train.grad_accum</code></td><td>1</td><td>同左</td><td>每卡每步几个 micro-batch。1 = 一步就是一个包</td></tr>
+        <tr><td>日志 <code>clips/rank</code></td><td>—</td><td>~31.6</td><td>每卡实际条数（16k 干跑时约 20.7）</td></tr>
+        <tr><td>日志 <code>fill</code></td><td>—</td><td>~0.976</td><td>相对单卡 24840 的有效行占比。再塞下一条会超则整条进下一包，<strong>不截断</strong>；本包不满就训</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn">
+      <div class="title">不要在 Qwen 常驻时加大 <code>max_tokens</code></div>
+      <p style="margin:0">
+        文本缓存命中时 10B + 16k 约 35 GB。缓存未命中会加载 Qwen3-VL-32B/50（约 49 GB）。
+        这次 24.8k 预训练 allocated 92.8 GB，个别 rank nvidia-smi 已到 122 / 141 GB。
+        中途改 <code>max_tokens</code> 还会打乱 sampler 封包，续训对不齐，应另开 <code>train.run_name</code>。
+      </p>
+    </div>
+
+    <h3>2. Loss 怎么读</h3>
+    <p>公式和变长平均见 <a href="#flow">§13</a>。目标 <code>v = ε − x0</code>，打印的是音频行上的逐元素 MSE，不是交叉熵。</p>
+    <table>
+      <thead><tr><th>字段</th><th>平均方式</th><th>读法</th></tr></thead>
+      <tbody>
+        <tr><td>日志 <code>loss</code></td><td><code>flow.loss_reduction: token</code>，所有音频行等权</td><td>15 s 对总 loss 的贡献约是 4 s 的 3.75 倍</td></tr>
+        <tr><td>日志 <code>music=… zhizhou=…</code></td><td>先对每条自己的行取平均，再按条平均</td><td>看这个源「一条有多难」</td></tr>
+        <tr><td><code>flow.loss_reduction=sample</code></td><td>先按条再平均</td><td>4 s 和 15 s 等权；默认不用</td></tr>
+        <tr><td>起步高度</td><td>约 <code>1 + Var(x0)</code></td><td>H3 白化后 <code>x0</code> std 只有 0.42–0.56，起步约 1.26。VR-Foley 5.5B 未白化、<code>x0</code> RMS≈1，起步约 2、后期常在 0.9+。<strong>两边数字不能直接比</strong></td></tr>
+      </tbody>
+    </table>
+
+    <h3>3. 节奏：日志 / val / preview / ckpt</h3>
+    <table>
+      <thead><tr><th>键</th><th>base 默认</th><th>这次 10B</th><th>做什么</th><th>写到哪</th></tr></thead>
+      <tbody>
+        <tr><td><code>train.log_every</code></td><td>20</td><td>20</td><td>打训练日志（各 rank 平均）</td><td>终端 + <code>&lt;run_dir&gt;/log.jsonl</code>（<code>event: train</code>）</td></tr>
+        <tr><td><code>train.val_every</code></td><td>2000</td><td>1000</td><td>验证集 flow MSE，<strong>不生成音频</strong></td><td>终端 <code>[val]</code> + <code>log.jsonl</code>（<code>event: val</code>）</td></tr>
+        <tr><td><code>train.preview_every</code></td><td>5000</td><td>1000</td><td>固定听评集出 wav（EMA、Euler 50、CFG 4）</td><td><code>&lt;run_dir&gt;/samples/step_XXXXXXX/{label}.wav</code> + 同名 <code>.txt</code></td></tr>
+        <tr><td><code>train.ckpt_every</code></td><td>2000</td><td>2000</td><td>写一份完整快照</td><td><code>&lt;run_dir&gt;/checkpoints/step_XXXXXXX/</code>，<code>latest</code> 指向它</td></tr>
+        <tr><td><code>train.keep_ckpts</code></td><td>3</td><td><strong>1</strong></td><td>只留最近 N 个 step 目录。10B 为 1：新存盘会删掉上一份</td><td>更早的会被删</td></tr>
+        <tr><td><code>train.save_sharded</code></td><td>true</td><td><strong>false</strong></td><td>false：不写 8 片 <code>state/</code>。一份里是 <code>model.safetensors</code> + <code>ema.safetensors</code> + <code>optimizer.pt</code>（续训要 Adam）</td><td>推理读 <code>ema.safetensors</code></td></tr>
+        <tr><td><code>train.export</code></td><td>none</td><td>ema</td><td>仅在 <code>save_sharded=true</code> 时额外再导出整文件。10B 已经是整文件快照，不必再叠一份</td><td>—</td></tr>
+      </tbody>
+    </table>
+    <p class="dim">
+      这次 10B 约 5.6 s/步：val+preview 每 1000 步大约 1.6 小时一次；ckpt 每 2000 步写 173 GB，大约 5 分钟。
+      改节奏对<strong>当前已启动的进程无效</strong>。第一份 ckpt 在 step 2000，之前停掉无法续训。
+    </p>
+
+    <h3>4. Val 是什么</h3>
+    <p>
+      就是验证集上的同一套 flow MSE，不是听评。
+      每个源按路径哈希留出 holdout（<code>data.source_defaults.holdout_ppm=500</code>），取哈希最小的 <code>data.val.per_source</code>（256）条；
+      中间窗口、caption dropout=0、不跨源打包。
+      <code>train.val_batches</code>（这次 <strong>0</strong>）限制本次跑多少个包，摊到各 rank；0 = 打完全部 holdout（5×256 条）。
+    </p>
+
+    <h3>5. Preview / 推理</h3>
+    <table>
+      <thead><tr><th>键</th><th>默认</th><th>这次 10B</th><th>含义</th></tr></thead>
+      <tbody>
+        <tr><td><code>preview.set</code></td><td><code>configs/eval/preview_set.json</code></td><td>同左</td><td>固定 18 条听评，跨 step 可对比</td></tr>
+        <tr><td><code>preview.labels</code></td><td><code>[]</code> = 全 18 条</td><td>同左</td><td>只渲其中几个 label</td></tr>
+        <tr><td><code>preview.train_captions</code></td><td>0</td><td><strong>0</strong></td><td>再从训练集每个源前几行抽多少条来生成，检查能不能拟合见过的 caption。<code>0</code> = 不抽，只要听评集。写成 5 会多 5 条 <code>train_&lt;源&gt;_&lt;row&gt;.wav</code></td></tr>
+        <tr><td><code>preview.seconds</code></td><td>null</td><td>同左</td><td>null = 用条目自己的时长收到 4–15 s；写成整数则 18 条一样长</td></tr>
+        <tr><td><code>preview.sampler / steps / cfg_scale</code></td><td>euler / 50 / 4.0</td><td>同左</td><td>和推理同一套</td></tr>
+        <tr><td><code>preview.use_ema</code></td><td>true</td><td>同左</td><td>听评用 EMA 权重</td></tr>
+        <tr><td><code>preview.batch</code></td><td>8</td><td>同左</td><td>一个 packed 序列里几条 caption；各 rank 均分 18 条</td></tr>
+        <tr><td><code>infer.checkpoint</code></td><td>latest</td><td>—</td><td>步号、路径或 <code>latest</code></td></tr>
+        <tr><td><code>infer.weights</code></td><td>ema</td><td>—</td><td><code>ema</code> 或 <code>model</code></td></tr>
+        <tr><td><code>infer.prompts</code> / <code>prompt_file</code></td><td>空 / null</td><td>—</td><td>命令行 caption，或 JSON/JSONL</td></tr>
+        <tr><td><code>infer.seconds</code></td><td>10</td><td>—</td><td>没写时长时的默认秒数</td></tr>
+        <tr><td><code>infer.output_dir</code></td><td>null → <code>&lt;run_dir&gt;/infer</code></td><td>—</td><td>推理 wav 目录</td></tr>
+      </tbody>
+    </table>
+<pre># 听评（训练过程自动写）
+ls outputs/train/t2a_10b/samples/step_0001000/
+
+# 推理（直接读分片 checkpoint）
+CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b \
+  'infer.prompts=["Heavy rain on a tin roof."]'
+CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b \
+  infer.prompt_file=configs/eval/preview_set.json infer.steps=30
+</pre>
+
+    <h3>6. 续训与并行</h3>
+    <table>
+      <thead><tr><th>键</th><th>默认</th><th>这次 10B</th><th>含义</th></tr></thead>
+      <tbody>
+        <tr><td><code>train.run_name</code></td><td>t2a_base</td><td>t2a_10b</td><td>实验族目录 <code>outputs/train/&lt;run_name&gt;/</code></td></tr>
+        <tr><td><code>train.stamp_run</code></td><td>false</td><td><strong>true</strong></td><td>新实验落到 <code>outputs/train/t2a_10b/YYYYMMDD_HHMMSS/</code>。正在跑的旧扁平目录继续当一次实验</td></tr>
+        <tr><td><code>train.resume</code></td><td>auto</td><td>同左</td><td><code>auto</code>：续最新带时间戳的子目录（没有则续扁平旧 run）。<code>null</code>：开一个新的时间戳目录</td></tr>
+        <tr><td><code>train.init_from</code></td><td>null</td><td>同左</td><td>只拿权重开新 run，不带优化器和数据状态</td></tr>
+        <tr><td><code>train.lr</code> / <code>warmup_steps</code></td><td>1e-4 / 1000</td><td>1e-4 / 2000</td><td>constant + warmup。step 400 时 lr = 400/2000 × 1e-4</td></tr>
+        <tr><td><code>train.ema_decay</code></td><td>0.999</td><td>0.9999</td><td>10B 用更慢的 EMA</td></tr>
+        <tr><td><code>train.parallel.kind</code></td><td>ddp</td><td>fsdp</td><td>10B 必须 FSDP2。单机 8 卡 <code>shard_size: null</code>；多机加 <code>train.parallel.shard_size=8</code> 做 HSDP</td></tr>
+        <tr><td><code>flow.shift</code></td><td>3.0</td><td>同左</td><td>训练和推理共用。H3 音频是 3，不要和 VR-Foley 的 5 混用</td></tr>
+      </tbody>
+    </table>
+<pre># 续训当前实验（auto → 最新时间戳子目录，或扁平的旧 run）
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 NPROC=8 \
+bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml
+
+# 开一次新实验（目录带开训时间）
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 NPROC=8 \
+bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml train.resume=null
+
+# 推理 / 合成单文件（族目录会解析到最新一次实验）
+CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b \
+  'infer.prompts=["Heavy rain on a tin roof."]'
+bash scripts/train/export_t2a.sh outputs/train/t2a_10b --checkpoint 2000 --weights ema
+</pre>
+  </section>
+
+  <!-- ========== 19 ========== -->
+  <section class="section" id="eval">
+    <h2><span class="num">19</span>评测与 H3 对齐</h2>
+    <p>
+      <code>tests/test_h3_parity.py</code>，入口 <code>scripts/vae/check_h3_parity.sh</code>。
+      关 TF32，容差 1e-4。14 项全过，报告在 <code>outputs/vae/parity/report.json</code>。
+    </p>
+    <ol>
+      <li>两种格式严格加载，配置等于 <code>configs/vae/model_h3.yaml</code>，符合音频约定。</li>
+      <li>随机 latent decode 对比官方 bundle：1.7e-6。</li>
+      <li>encode mean / logs 对比官方子模块：7.5e-5 / 5.2e-6；白化 encode / decode 对比 DiffSynth：9.6e-5 / 5.7e-5 / 2.8e-7。</li>
+      <li>左右相同则 latent 相同；批量编码等于逐条，误差为 0。</li>
+      <li>导出再加载，逐位一致。</li>
+      <li>真实音频：门槛是 <code>mel_l1 &lt; 0.5</code>。SI-SDR、σ、KL、白化统计只写进报告。</li>
+    </ol>
+    <div class="callout warn">
+      <div class="title">不要用 SI-SDR 卡 GAN 解码器</div>
+      <p style="margin:0">
+        BigVGAN 重建雨声这类噪声纹理时频谱可以对、相位是新生成的。
+        官方自己在 rain 上就是 −19.57 dB，mel_l1 却只有 0.155。
+        每条音频另存 <code>&lt;label&gt;_src.wav</code> / <code>&lt;label&gt;_rec.wav</code>，直接听。
+      </p>
+    </div>
+
+    <h3>8 条 preview（H3 原权重，各 10 s）</h3>
+    <table>
+      <thead>
+        <tr><th>clip</th><th>SI-SDR</th><th>mel_l1</th><th>8–16 kHz 能量比</th><th>σ p50</th><th>KL/维</th><th>白化 std</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>solo piano</td><td>11.3</td><td>0.172</td><td>80%</td><td>0.0047</td><td>5.32</td><td>0.47</td></tr>
+        <tr><td>vocal lyric</td><td>0.79</td><td>0.203</td><td><strong>29%</strong></td><td>0.0039</td><td>5.47</td><td>0.48</td></tr>
+        <tr><td>dialogue</td><td>1.68</td><td>0.178</td><td>60%</td><td>0.0056</td><td>5.34</td><td>0.51</td></tr>
+        <tr><td>zh mandarin female young</td><td>14.6</td><td><strong>0.316</strong></td><td>73%</td><td>0.0040</td><td>5.73</td><td>0.54</td></tr>
+        <tr><td>footsteps</td><td>1.45</td><td>0.152</td><td>80%</td><td>0.0054</td><td>5.18</td><td>0.45</td></tr>
+        <tr><td>rock drums</td><td>17.7</td><td>0.176</td><td>63%</td><td>0.0058</td><td>5.28</td><td>0.50</td></tr>
+        <tr><td>bird call</td><td>6.80</td><td>0.159</td><td>71%</td><td>0.0054</td><td>5.27</td><td>0.53</td></tr>
+        <tr><td>rain</td><td><span class="tag d">−19.6</span></td><td>0.155</td><td>57%</td><td>0.0043</td><td>5.37</td><td>0.42</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li>白化后通道 std 0.42–0.56，不是 1。H3 的 <code>latents_std</code> 大约是这批实测的 2 倍。</li>
+      <li>人声高频损失明显：vocal lyric 8–16 kHz 只剩 29%，其他 57–80%。</li>
+      <li>后验接近确定性：σ 中位数 ~0.005，每维 KL ~5.3。</li>
+    </ul>
+    <p>
+      指标实现：<code>chrome/eval/recon.py</code>。
+      <code>mel_l1</code> 是三档 Mel（512/64、1024/128、2048/128）的 |log10| 均值。
+      立体声另报 L/R 相关、side/mid、ILD。
+    </p>
+  </section>
+
+  <!-- ========== 20 ========== -->
+  <section class="section" id="run">
+    <h2><span class="num">20</span>环境与可执行命令</h2>
+    <p>
+      conda 环境 <code>ovi</code>（torch 2.6、torchaudio 2.6、omegaconf 2.3），依赖见 <code>requirements.txt</code>。
+      脚本从哪调用都可以：自己先 <code>cd</code> 到仓库根。
+    </p>
+<pre># 进入工程
+cd /mnt/data04/480634/728342682@qq.com/1_CODE/AUDIO/PreTrain/Chrome-10B
+
+# S0：H3 Audio VAE 对齐检查（约 15 秒，单卡）
+CUDA_VISIBLE_DEVICES=0 bash scripts/vae/check_h3_parity.sh
+
+# 只跑一条 4 秒，输出另放
+CUDA_VISIBLE_DEVICES=0 bash scripts/vae/check_h3_parity.sh \
+  parity.clip_seconds=4 \
+  parity.clip_labels='[solo piano]' \
+  parity.output_dir=outputs/vae/parity_smoke
+
+# CPU 冒烟
+bash scripts/vae/check_h3_parity.sh parity.device=cpu parity.clip_labels='[solo piano]'
+
+# 换解释器
+PYTHON=/path/to/python bash scripts/vae/check_h3_parity.sh
+
+# 直接调测试入口
+CUDA_VISIBLE_DEVICES=0 python tests/test_h3_parity.py --config configs/vae/h3_frozen.yaml
+
+# S1：数据管线自检（合成音频，CPU，约 25 秒）
+bash scripts/data/check_data_pipeline.sh
+
+# 建索引：没变的源自动跳过；只重建某个源
+bash scripts/data/build_index.sh
+bash scripts/data/build_index.sh data.only=[zhizhou] data.build.force=true
+
+# 行数、时长、丢弃原因、长度分布、混合后的占比和 epoch 数
+bash scripts/data/inspect_data.sh inspect.world_size=64 inspect.steps=300000
+
+# loader 吞吐，顺便写几条音频 + caption 到 outputs/data/bench/ 试听；加 VAE 编码要一张空闲的卡
+bash scripts/data/bench_loader.sh
+CUDA_VISIBLE_DEVICES=0 bash scripts/data/bench_loader.sh bench.vae=true
+
+# S2：单测（CPU，约 15 秒）和端到端检查（8 卡，约 200 秒；--keep 保留产物）
+CUDA_VISIBLE_DEVICES="" bash scripts/dit/check_t2a_stack.sh
+bash scripts/train/check_t2a_smoke.sh --keep
+
+# 预填文本缓存 + 写 text stats（一张卡；第一次会加载 Qwen3-VL-32B/50）
+CUDA_VISIBLE_DEVICES=0 bash scripts/text/cache_text.sh configs/train/t2a_smoke.yaml
+
+# 训练：默认用所有可见卡；同一命令重跑即续训
+bash scripts/train/train_t2a.sh configs/train/t2a_smoke.yaml                                   # tiny，500 条，DDP
+bash scripts/train/train_t2a.sh configs/train/t2a_smoke.yaml train.parallel.kind=fsdp train.run_name=t2a_smoke_fsdp
+bash scripts/train/train_t2a.sh configs/train/t2a_1b.yaml                                      # 1B，FSDP
+bash scripts/train/train_t2a.sh configs/train/t2a_1b.yaml dit.adaln=shared train.run_name=t2a_1b_shared
+bash scripts/train/train_t2a.sh configs/train/t2a_1b.yaml dit.text_norm=stats dit.text_clip=8 train.run_name=t2a_1b_stats
+bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml data.loader.subset=100 train.max_steps=20 train.run_name=t2a_10b_dry
+bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml                                     # 10B，单机 8 卡 FSDP
+# 多机（每台各跑一次，NODE_RANK 不同）：机内分片、机间复制（HSDP）
+NNODES=4 NODE_RANK=0 MASTER_ADDR=10.0.0.1 bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml train.parallel.shard_size=8
+
+# 推理（直接读分片 checkpoint，默认 latest 的 EMA）
+CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_smoke 'infer.prompts=["Heavy rain on a tin roof."]'
+CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_smoke infer.prompt_file=configs/eval/preview_set.json infer.steps=30
+
+# 导出单文件 fp32 权重（CPU）
+bash scripts/train/export_t2a.sh outputs/train/t2a_10b
+bash scripts/train/export_t2a.sh outputs/train/t2a_10b --checkpoint 2000 --weights model
+</pre>
+
+    <h3>代码里怎么用 VAE</h3>
+<pre>from chrome.codec import load_h3_audio_vae
+from chrome.data.audio_io import load_audio, save_audio
+
+vae = load_h3_audio_vae(
+    "/mnt/data04/480634/public/2_CKPT/3_PreTRAINED/MiniMax-H3/FL2VA/audio_vae",
+    device="cuda",
+)
+wave = load_audio("clip.wav")            # [2, N] @ 32 kHz
+latent = vae.encode_audio(wave)          # [2, 32, T]，已白化
+wave_rec = vae.decode_audio(latent)      # [2, T*800]
+save_audio("rec.wav", wave_rec, 32000)
+</pre>
+
+    <div class="callout good">
+      <div class="title">本页覆盖到哪、下一版补什么</div>
+      <ul style="margin-bottom:0">
+        <li>已实现：音频契约、读文件与立体声、VAE、数据管线、DiT / MM-RoPE / flow / 文本缓存、训练框架；这次 10B 预训练链路见 §03 / §04，8 卡效率见 §16。</li>
+        <li>已定（不跟 H3）：文本行 AdaLN 的 t 跟音频（§10）；CFG 无条件用单个空格（§12）。</li>
+        <li>待定风险：左右耳 w 绑在视频画幅上（§08）；AdaLN 形式、Qwen 规模、文本归一化（§14 / §09）；16 kHz 的 zhizhou 占 44% 时长（§06）。</li>
+        <li>预留但没接：参考音频、inpainting / 续写、逐行不同 σ（§12）。</li>
+        <li>已知可优化：训练时 Qwen 在线编码（§04、§15）；推理 DiT 以 fp32 常驻且有 autocast 缓存（§15）。推理显存和耗时还没实测，下一版补。</li>
+        <li>S4 蒸馏、S5 视频仍是规划。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ========== 21 ========== -->
+  <section class="section" id="layout">
+    <h2><span class="num">21</span>目录、配置、已知坑</h2>
+<pre>Chrome-10B/
+├── skills.md
+├── docs/chrome_pipeline.html          ← 本页
+├── docs/minimax_h3_analysis.html      H3 分析笔记
+├── chrome/
+│   ├── spec.py                        AudioSpec：秒 ↔ 点 ↔ 帧 ↔ 行
+│   ├── config.py                      _base_ 继承 + 插值 + 命令行覆盖
+│   ├── codec/                         AudioVAE、白化、bundle/diffusers I/O
+│   ├── data/
+│   │   ├── audio_io.py                read / 窗口读 / resample（核缓存）/ to_stereo / limit_peak / save
+│   │   ├── manifest.py                JSONL / Parquet：列名候选、keep 过滤、分块
+│   │   ├── captions.py                H3 tokenizer、NULL_CAPTION
+│   │   ├── index.py                   LengthPolicy、SourceSpec、并行建索引、SourceIndex
+│   │   ├── sampler.py                 MixtureBatchSampler、验证集固定 batch
+│   │   ├── dataset.py                 T2ADataset、BadAudioList
+│   │   ├── batch.py                   collate_t2a、encode_waves
+│   │   ├── loader.py                  build_train_loader、build_val_loader
+│   │   └── cli.py                     build / inspect / bench
+│   ├── text/                          TextEncoder 注册表、Qwen3-VL 截断、random、CachedTextEncoder
+│   ├── dit/
+│   │   ├── config.py                  DiTConfig（text_norm / text_clip）
+│   │   ├── packing.py                 Segment、pack（varlen，补到 64 的倍数）
+│   │   ├── layout.py                  Layout 注册表；T2ALayout = [text | audio L | audio R]
+│   │   ├── rope.py / adaln.py         MMRoPE + StereoW；PerLayer / Shared AdaLN
+│   │   ├── attention.py / layers.py   varlen 注意力（flash / sdpa）；block、refiner
+│   │   └── model.py                   ChromeDiT（init_weights、shard_units、set_text_stats）
+│   ├── flow/                          schedule（shift、σ 采样）、objective、sampler 注册表（euler）
+│   ├── tasks/{base,t2a}.py            Task 接口 + 注册表；T2ATask、encode_t2a、t2a_flow_loss
+│   ├── pipeline/t2a.py                T2APipeline：from_run、generate（CFG、每条独立种子）
+│   ├── train/
+│   │   ├── dist.py                    torchrun 环境、单进程退化
+│   │   ├── parallel.py                DDP / FSDP2 / HSDP、分片 EMA
+│   │   ├── checkpoint.py              run 目录、DCP 存取、load_weights、export_weights
+│   │   ├── trainer.py                 与任务无关的 Trainer
+│   │   └── cli.py                     train / infer / text-cache / export
+│   └── eval/recon.py                  si_sdr、mel_l1、stereo_report
+├── configs/_base_/{audio_spec,paths}.yaml
+├── configs/vae/{model_h3,h3_frozen}.yaml
+├── configs/data/{t2a_base,sources_vrfoley}.yaml
+├── configs/dit/{tiny,1b,10b}.yaml
+├── configs/text/{qwen3vl_32b,random}.yaml
+├── configs/train/{t2a_base,t2a_smoke,t2a_1b,t2a_10b}.yaml
+├── configs/eval/preview_set.json
+├── scripts/env.sh                     PYTHON、PYTHONPATH
+├── scripts/vae/check_h3_parity.sh
+├── scripts/data/{build_index,inspect_data,bench_loader,check_data_pipeline}.sh
+├── scripts/text/cache_text.sh
+├── scripts/dit/check_t2a_stack.sh
+├── scripts/train/{train_t2a,export_t2a,check_t2a_smoke}.sh
+├── scripts/infer/infer_t2a.sh
+├── tests/{test_h3_parity,test_data_pipeline,test_t2a_stack,test_t2a_e2e}.py
+└── outputs/                           vae/parity/、data/index/、text_cache/、train/、check/
+</pre>
+
+    <h3>配置约定</h3>
+    <ul>
+      <li>OmegaConf。<code>_base_</code> 可以是路径或列表，按顺序合并，自身最后合并；再套命令行 <code>key=value</code>，再解析 <code>${...}</code>。</li>
+      <li>相对路径从 <code>Chrome-10B/</code> 根算。脚本先 <code>cd</code> 再 <code>source scripts/env.sh</code>。</li>
+      <li>外部路径只写在 <code>configs/_base_/paths.yaml</code>：H3 根、两种 VAE、文本编码器、tokenizer、DiffSynth、VR-Foley、音频数据根、preview、输出目录、数据索引目录。</li>
+      <li>列表里有 <code>${...}</code> 插值时写块列表（<code>- ${paths.x}</code>）；写成 <code>[${paths.x}]</code> YAML 会解析失败。</li>
+    </ul>
+
+    <h3>已知坑</h3>
+    <ul>
+      <li>系统 <code>python3</code> 没有 safetensors，要用 ovi（<code>scripts/env.sh</code> 里的 <code>PYTHON</code>）。</li>
+      <li>直接 <code>import diffsynth</code> 会去拉 modelscope。对齐检查在 <code>sys.modules</code> 里塞空包，只加载 <code>minimax_h3_audio_vae.py</code>。DiffSynth 加载前，<code>pre_block.attn.{q_bias,v_bias,zero_k_bias}</code> 要加 <code>.weight</code> 后缀。</li>
+      <li>官方 bundle 的 <code>MiniMaxH3AudioVAE</code> 只暴露 <code>decode</code>；编码得手动走 <code>.model</code> 的 encoder → pre_block → mean_proj。</li>
+      <li>对齐必须关 TF32。打开时 decode 对官方 1.1e-3，encode 对 DiffSynth 4.9e-2；关掉才进 1e-4。</li>
+      <li>GAN 重建看频谱（mel_l1），不要看 SI-SDR。</li>
+      <li>VAE 批量编码只拼等长片段；补零后一起编码，被补片段最后约 10 帧 latent 会变。</li>
+      <li>H3 tokenizer 要经 <code>AutoTokenizer.from_pretrained(目录)</code> 加载，直接读 <code>tokenizer.json</code> 会把 <code>&lt;d&gt;</code> 拆开。</li>
+      <li>建索引主要花在 caption 分词；<code>encode_batch_fast</code>（不算 offset）快约 2.7 倍，id 相同。</li>
+      <li>FSDP 下所有 rank 的前向次数必须相同，否则卡在 all-gather 直到超时；新加的验证 / preview 逻辑都要补齐。</li>
+      <li>FSDP 的 <code>MixedPrecisionPolicy</code> 默认把前向输入转成 bf16，会损失 RoPE 位置和时间步的精度；要设 <code>cast_forward_inputs=False</code>。</li>
+      <li>root 不 reshard 的话，no-grad 前向后会留着已经 gather 的旧权重，EMA 换权重会失效。</li>
+      <li>10B 关掉激活重算会 OOM（16k token/卡）。</li>
+      <li>run 目录已有 checkpoint 时，重跑同一命令会续训；要从头开始，加 <code>train.resume=null</code> 或换 <code>train.run_name</code>。</li>
+    </ul>
+  </section>
+
+  <footer>
+    Chrome-10B 工程说明 · 依据当前仓库 <code>chrome/</code>、<code>configs/train/t2a_10b.yaml</code>、
+    <code>outputs/train/t2a_10b/log.jsonl</code> 与 <a href="./minimax_h3_analysis.html">minimax_h3_analysis.html</a>。
+    S3 10B 预训练进行中；S4–S5 标注为规划的部分以 H3 约定为准。
+    参数量为按 config 精确计算；训练显存 / 步时为实测；推理显存 / 耗时标「估算」处未实测（训练占满全部 GPU）。
+  </footer>
+
+</div>
+</body>
+</html>

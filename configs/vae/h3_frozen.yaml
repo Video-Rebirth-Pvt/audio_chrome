@@ -1,0 +1,33 @@
+# Frozen H3 audio VAE: baseline for every VAE run and the codec for the 1B DiT ablation.
+#
+# CUDA_VISIBLE_DEVICES=0 bash scripts/vae/check_h3_parity.sh
+_base_: [../_base_/paths.yaml, model_h3.yaml]
+
+vae_checkpoint: ${paths.h3_audio_vae}
+
+parity:
+  device: cuda
+  seed: 22
+  bundle_dir: ${paths.h3_audio_vae}
+  diffusers_dir: ${paths.h3_audio_vae_diffusers}
+  diffsynth_root: ${paths.diffsynth_root}
+  # Largest |difference| allowed against the official decode and the DiffSynth encode.
+  atol: 1.0e-4
+  # Random latent length for the decode check, and clip length for the encode check.
+  probe_seconds: 4.0
+  # Real clips from the preview set, encoded and decoded once each.
+  preview_set: ${paths.preview_set}
+  clip_labels:
+    - solo piano
+    - vocal lyric
+    - dialogue
+    - zh mandarin female young
+    - footsteps
+    - rock drums
+    - bird call
+    - rain
+  clip_seconds: 10.0
+  # The GAN decoder resynthesises noisy textures with new phase (H3 rain: si_sdr −19.6 dB at
+  # mel_l1 0.155), so the gate is spectral. H3 itself stays below 0.32 on these clips.
+  max_mel_l1: 0.5
+  output_dir: ${paths.output_root}/vae/parity

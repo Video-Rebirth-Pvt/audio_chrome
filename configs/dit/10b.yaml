@@ -1,0 +1,10 @@
+# S3 scale: 10.822B total, 6.107B backbone, 4.247B AdaLN (per_layer). Train with train.parallel.kind=fsdp.
+_base_: tiny.yaml
+dit:
+  preset: 10b
+  num_layers: 28
+  hidden_size: 4096
+  num_heads: 32
+  ffn_hidden_size: 12288
+  time_embed_dim: 2048
+  gradient_checkpointing: true
