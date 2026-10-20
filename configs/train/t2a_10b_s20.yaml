@@ -1,5 +1,6 @@
 # 10B T2A, clips up to 20 s, started from the EMA weights of the 15 s run (t2a_10b, step 100000).
-# Fresh AdamW, fresh data stream; same five VR-Foley sources and max_records as t2a_10b.
+# Fresh AdamW, fresh data stream. Sources come from sources_vrfoley.yaml (shared with t2a_10b); to give this
+# run its own mix, copy the whole data.sources list here (a list replaces, it does not merge).
 #
 # Indexes go to their own root: max_seconds is part of every source's fingerprint, and the 15 s run keeps
 # reading outputs/data/index. Clips of 15–20 s that the 15 s run dropped come back (hifitts2, zhizhou).
