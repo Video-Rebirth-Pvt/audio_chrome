@@ -4,6 +4,10 @@
 #
 # Indexes go to their own root: max_seconds is part of every source's fingerprint, and the 15 s run keeps
 # reading outputs/data/index. Clips of 15–20 s that the 15 s run dropped come back (hifitts2, zhizhou).
+# Preview uses preview_set_s20.json: the 18 clips plus one 20 s hifitts2 and one 20 s zhizhou clip. It is
+# also the training exclude list, so these two never enter the index.
+#
+# Output: outputs/train/t2a_10b_s20/<YYYYMMDD_HHMMSS>/{config.yaml, log.jsonl, tb/, checkpoints/, samples/}
 #
 # bash scripts/data/build_index.sh --config configs/train/t2a_10b_s20.yaml          # once, before training
 # bash scripts/data/inspect_data.sh --config configs/train/t2a_10b_s20.yaml
@@ -13,6 +17,9 @@
 # CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b_s20 infer.seconds=20 'infer.prompts=["Rain on a tin roof."]'
 # bash scripts/train/tensorboard.sh outputs/train/t2a_10b_s20
 _base_: t2a_10b.yaml
+
+paths:
+  preview_set: configs/eval/preview_set_s20.json
 
 audio:
   max_seconds: 20
