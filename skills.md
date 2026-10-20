@@ -184,7 +184,24 @@ for batch in loader:
     ckpt["data"] = sampler.state_dict(batch["batch_id"])
 ```
 
-加一个数据源：在 `data.sources` 里加一项（`name`、`paths`、`max_records`，按需写 `columns` / `keep` / `fit` / `long`），然后 `bash scripts/data/build_index.sh data.only=[新源名]`。
+加一个数据源：在 `data.sources` 里加一项（`name`、`paths`、`max_records`，按需写 `columns` / `keep` / `fit` / `long`），然后 `bash scripts/data/build_index.sh data.only=[新源名]`。`keep` 的值写成列表表示「取其中任一个」，例如 `qa_risk_level: [clean, medium]`。
+
+**音频内嵌在 Parquet 里的数据（HF `datasets` 格式，如 WorldSpeech）**（`chrome/data/blobs.py`、`scripts/data/repack_audio.sh`）
+
+- HF 分片把整个文件的音频放在一个 ZSTD 字典页里（每个文件 1 个 row group、1024 行、约 110 MB），读任意一条都要解压整列，没法按条随机读。所以先转存一次：音频字节原样拷进未压缩的 Arrow 文件 `<blobs>/<locale>/<分片名>.arrow`，不重编码。转存文件记录源分片的大小和 mtime，没变就跳过；建索引时发现过期或缺失会报错，提示重跑转存。
+- 索引里的音频路径是引用 `<文件>.arrow#<行号>`；读取时内存映射取出这一条的字节，再走和普通文件相同的解码路径（soundfile，失败再用 torchaudio；要裁窗时在内存文件上 seek）。坏文件列表、去重、验证集划分照常按这个字符串处理。
+- 建索引时不读音频列，只投影其余列。伴生 parquet（`sidecar`，`<root>/<locale>/<分片名>`）按行顺序 join：行数不同、`row_index` 或 `segment_id` 对不上都直接报错。同名列以伴生表为准。伴生文件的大小和 mtime 进清单指纹，改了就重建。
+- 数据源新增三个键：`include`（目录里分片名的 glob，`train-*.parquet` 把 test 分片排除在外）、`sidecar`、`blobs`。没写这三个键的源，指纹和以前一样。
+- 只含 WorldSpeech 的数据配置是 `configs/data/t2a_worldspeech.yaml`（源列表在 `sources_worldspeech.yaml`），用来先跑通新语种，再并进训练配比。
+
+```bash
+bash scripts/data/repack_audio.sh --config configs/data/t2a_worldspeech.yaml
+bash scripts/data/build_index.sh --config configs/data/t2a_worldspeech.yaml
+bash scripts/data/inspect_data.sh --config configs/data/t2a_worldspeech.yaml
+bash scripts/data/bench_loader.sh --config configs/data/t2a_worldspeech.yaml bench.output_dir=outputs/data/bench_ws
+```
+
+yue_hk 实测（2026-10-20，`max_seconds=15`）：169 个 train 分片、172,104 行，转存 17.4 GiB 用时 19 s（约 2 GB/s，32 进程）。建索引 91 s，留下 82,345 条训练行加 48 条验证行，共 297 h。丢弃：超过 15 s 的 72,935 条，`qa_risk_level=high` 的 16,560 条，短于 4 s 的 216 条。片段几乎都在 11–15 s，90% 需要补齐。loader 单进程 12 个 worker 跑到 7.8 batch/s、174 条/s，包填充率 97%。Opus 解码比读 wav 慢（同配置下 VR-Foley 五个源是 32 batch/s），但 10B 每步 3.4 s，仍有二十多倍余量。`resp` 里的 `[Cantonese][Cantonese]` 按原样保留。
 
 ### VR-Foley 五个源的实测（2026-10-12）
 
@@ -286,7 +303,8 @@ Chrome-10B/
 │   │   └── modules/                  conv、activations、alias_free、encoder、attn_proj、gaussian、bigvgan
 │   ├── data/
 │   │   ├── audio_io.py               read_audio、read_audio_window、resample（核缓存）、to_stereo、limit_peak、load_audio、save_audio
-│   │   ├── manifest.py               JSONL / Parquet 清单：列名候选、keep 过滤、分块
+│   │   ├── manifest.py               JSONL / Parquet 清单：列名候选、keep 过滤、分块、伴生表 join
+│   │   ├── blobs.py                  Parquet 内嵌音频 → Arrow 转存，`<文件>.arrow#<行>` 引用的读取
 │   │   ├── captions.py               H3 tokenizer 加载、caption → ids、NULL_CAPTION
 │   │   ├── index.py                  LengthPolicy、SourceSpec、并行建索引、SourceIndex
 │   │   ├── sampler.py                MixtureBatchSampler（加权混合、token 打包、续训）、验证集用的固定 batch
@@ -329,6 +347,7 @@ Chrome-10B/
 │   ├── vae/h3_frozen.yaml            冻结的 H3 VAE + 对齐检查参数
 │   ├── data/t2a_base.yaml            数据管线参数（索引、长度、loader、验证集、bench）
 │   ├── data/sources_vrfoley.yaml     VR-Foley 的五个数据源和权重
+│   ├── data/sources_worldspeech.yaml WorldSpeech 各语种（内嵌音频 + QA 伴生表），t2a_worldspeech.yaml 单独使用
 │   ├── dit/{tiny,1b,10b}.yaml        DiT 预设
 │   ├── text/{qwen3vl_32b,random}.yaml
 │   ├── train/t2a_base.yaml           task / layout / flow / train / preview / infer / text_cache 全部参数
@@ -339,7 +358,7 @@ Chrome-10B/
 ├── scripts/
 │   ├── env.sh                        PYTHON、PYTHONPATH
 │   ├── vae/check_h3_parity.sh
-│   ├── data/{build_index,inspect_data,bench_loader,check_data_pipeline}.sh
+│   ├── data/{repack_audio,build_index,inspect_data,bench_loader,check_data_pipeline}.sh
 │   ├── text/cache_text.sh            预填文本缓存 + 写 stats.safetensors
 │   ├── dit/check_t2a_stack.sh        S2 单测（CPU 即可）
 │   ├── train/train_t2a.sh            torchrun 启动，单机 / 多机

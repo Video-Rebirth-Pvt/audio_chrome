@@ -1,0 +1,9 @@
+# WorldSpeech-only data config: the T2A pipeline of t2a_base.yaml with sources_worldspeech.yaml as the
+# whole source list (a later list replaces an earlier one). For bringing up new locales before they join
+# the training mixture.
+#
+# bash scripts/data/repack_audio.sh --config configs/data/t2a_worldspeech.yaml
+# bash scripts/data/build_index.sh --config configs/data/t2a_worldspeech.yaml
+# bash scripts/data/inspect_data.sh --config configs/data/t2a_worldspeech.yaml
+# bash scripts/data/bench_loader.sh --config configs/data/t2a_worldspeech.yaml bench.output_dir=outputs/data/bench_ws
+_base_: [t2a_base.yaml, sources_worldspeech.yaml]

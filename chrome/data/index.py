@@ -83,6 +83,12 @@ class SourceSpec:
     caption_prefix: str = ""
     max_records: int | None = None
     holdout_ppm: int = 500
+    # Glob on manifest file names inside a directory path, e.g. "train-*.parquet".
+    include: str | None = None
+    # Parquet joined row by row: <sidecar>/<parent dir of the manifest>/<manifest file name>.
+    sidecar: str | None = None
+    # Repacked embedded audio: <blobs>/<parent dir>/<stem>.arrow (scripts/data/repack_audio.sh).
+    blobs: str | None = None
 
     @classmethod
     def from_config(cls, source, defaults) -> "SourceSpec":
@@ -102,6 +108,9 @@ class SourceSpec:
             caption_prefix=str(merged.get("caption_prefix") or ""),
             max_records=None if merged.get("max_records") in (None, "") else int(merged["max_records"]),
             holdout_ppm=int(merged.get("holdout_ppm", 500)),
+            include=_optional_str(merged.get("include")),
+            sidecar=_optional_str(merged.get("sidecar")),
+            blobs=_optional_str(merged.get("blobs")),
         )
         if spec.fit not in ("pad", "crop") or spec.long not in ("drop", "crop"):
             raise ValueError(f"{spec.name}: fit must be pad|crop and long drop|crop")
@@ -116,13 +125,26 @@ class SourceSpec:
         data = asdict(self)
         data.pop("weight")
         data.pop("task")
+        for key in ("include", "sidecar", "blobs"):
+            if data[key] is None:
+                # Indexes built before these keys existed keep their fingerprint.
+                data.pop(key)
         return data
+
+    def stamps(self) -> list[tuple[str, int, int]]:
+        return manifest_stamp(self.paths, self.include, self.sidecar)
 
 
 def _optional_float(value) -> float | None:
     if value in (None, ""):
         return None
     return float(value)
+
+
+def _optional_str(value) -> str | None:
+    if value in (None, ""):
+        return None
+    return str(value)
 
 
 def mixture_weight(spec: "SourceSpec", n_rows: int) -> float:
@@ -201,10 +223,16 @@ def _init_worker(tokenizer_dir: str, exclude: set[str], bad: set[str]) -> None:
 
 
 def probe_duration(path: str) -> float | None:
+    from chrome.data.audio_io import audio_source
+
+    try:
+        source = audio_source(path)
+    except Exception:
+        return None
     try:
         import soundfile as sf
 
-        info = sf.info(path)
+        info = sf.info(source())
         if info.frames > 0 and info.samplerate > 0:
             return info.frames / info.samplerate
     except Exception:
@@ -212,7 +240,7 @@ def probe_duration(path: str) -> float | None:
     try:
         import torchaudio
 
-        info = torchaudio.info(path)
+        info = torchaudio.info(source())
         if info.num_frames > 0 and info.sample_rate > 0:
             return info.num_frames / info.sample_rate
     except Exception:
@@ -334,7 +362,7 @@ def build_source(spec: SourceSpec, cfg, workers: int, force: bool = False, log=p
     out = Path(data["index_root"]) / spec.name
     meta_path = out / META_FILE
     config_fp = config_fingerprint(spec, cfg)
-    stamps = manifest_stamp(spec.paths)
+    stamps = spec.stamps()
     if not force and meta_path.is_file():
         meta = json.loads(meta_path.read_text())
         if meta.get("config_fingerprint") == config_fp and meta.get("manifests") == [list(s) for s in stamps]:
@@ -342,7 +370,9 @@ def build_source(spec: SourceSpec, cfg, workers: int, force: bool = False, log=p
             return meta
 
     started = time.monotonic()
-    chunks = plan_chunks(spec.paths, max(1, int(float(data["build"]["chunk_mb"]) * (1 << 20))))
+    chunks = plan_chunks(
+        spec.paths, max(1, int(float(data["build"]["chunk_mb"]) * (1 << 20))), spec.include, spec.sidecar, spec.blobs
+    )
     tmp = out / f".tmp-{os.getpid()}"
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
@@ -486,5 +516,5 @@ def check_index(spec: SourceSpec, index: SourceIndex, cfg, log=print) -> None:
             f"index for source {spec.name!r} was built from a different config; "
             f"rerun: bash scripts/data/build_index.sh data.only=[{spec.name}]"
         )
-    if index.meta.get("manifests") != [list(s) for s in manifest_stamp(spec.paths)]:
+    if index.meta.get("manifests") != [list(s) for s in spec.stamps()]:
         log(f"[data] warning: manifests of {spec.name!r} changed since the index was built")

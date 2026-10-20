@@ -10,6 +10,12 @@ paths:
   vrfoley_root: /mnt/data04/480634/728342682@qq.com/1_CODE/AUDIO/PreTrain/VR-Foley-5.5B
   # Audio corpora and their JSONL manifests (read-only).
   data_root: /mnt/data04/480634/public/0_DATA/1_AUDIO
+  # HF parquet shards with the audio embedded as bytes, one dir per locale (read-only).
+  worldspeech_root: ${paths.data_root}/SPEECH/WorldSpeech/data
+  # Per-shard sidecars (resp + QA fields), same <locale>/<file name> layout and row order.
+  qa_sidecar_root: /mnt/data04/480634/728342682@qq.com/1_CODE/FILTER/AudioFilter/outputs/qa_sidecar
+  # Embedded audio repacked to memory-mappable Arrow by scripts/data/repack_audio.sh; about the parquet size.
+  audio_arrow_root: ${paths.output_root}/data/audio_arrow
   preview_set: configs/eval/preview_set.json
   output_root: outputs
   # Built by scripts/data/build_index.sh; a few GB per ten million rows.

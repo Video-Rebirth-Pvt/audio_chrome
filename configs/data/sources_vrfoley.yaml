@@ -10,7 +10,8 @@
 # Per-source keys (defaults in data.source_defaults):
 #   name, task, paths (files or directories of .jsonl / .parquet)
 #   columns: {audio, caption, duration, sample_rate}
-#   keep: {field: value} or {field: {min, max, allow_missing}}
+#   keep: {field: value}, {field: [any, of, these]} or {field: {min, max, allow_missing}}
+#   include, sidecar, blobs: parquet with embedded audio, see sources_worldspeech.yaml
 #   fit: pad | crop      pad rounds up; crop rounds down to a random window
 #   long: drop | crop    clips past max_seconds + slack
 #   caption_prefix, max_records, holdout_ppm

@@ -1,12 +1,21 @@
-"""Manifest rows: JSONL (byte-range chunks) or Parquet (row-group chunks), column lookup and keep filters."""
+"""Manifest rows: JSONL (byte-range chunks) or Parquet (row-group chunks), column lookup and keep filters.
+
+Parquet with the audio embedded as bytes (HF ``datasets``) reads every column except the bytes; the audio
+field of each row becomes a ref into the repacked Arrow file (``chrome/data/blobs.py``). A sidecar parquet
+with the same row order (``<sidecar>/<parent dir>/<file name>``) adds or overrides columns, e.g. captions
+and QA scores produced after the download.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+import fnmatch
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 import orjson
+
+from chrome.data.blobs import blob_path, blob_ref, check_blob, embedded_audio_column
 
 AUDIO_KEYS = ("path", "audio", "audio_filepath", "wav")
 CAPTION_KEYS = ("resp", "caption", "normalized_text", "text")
@@ -53,10 +62,16 @@ def _is_range(spec) -> bool:
 
 
 def row_kept(row: Mapping, keep: Mapping) -> bool:
-    """Exact match (compared as strings), or ``{min, max, allow_missing}``; missing numbers pass by default."""
+    """Exact match or any of a list (compared as strings), or ``{min, max, allow_missing}``.
+
+    Missing numbers pass a range by default.
+    """
     for key, spec in keep.items():
         value = row.get(key)
-        if _is_range(spec):
+        if isinstance(spec, Sequence) and not isinstance(spec, str):
+            if str(value) not in {str(s) for s in spec}:
+                return False
+        elif _is_range(spec):
             if value in (None, ""):
                 if not spec.get("allow_missing", True):
                     return False
@@ -76,20 +91,29 @@ def row_kept(row: Mapping, keep: Mapping) -> bool:
 
 @dataclass(frozen=True)
 class Chunk:
-    """JSONL: rows whose first byte lies in [start, stop). Parquet: row groups [start, stop)."""
+    """JSONL: rows whose first byte lies in [start, stop). Parquet: row groups [start, stop).
+
+    ``sidecar``: parquet joined row by row. ``blob``: repacked audio of a parquet with embedded bytes.
+    """
 
     path: str
     kind: str
     start: int
     stop: int
+    sidecar: str | None = None
+    blob: str | None = None
 
 
-def manifest_files(path: str | Path) -> list[Path]:
+def manifest_files(path: str | Path, include: str | None = None) -> list[Path]:
+    """A file, or the manifests in a directory whose names match ``include`` (a glob, e.g. ``train-*``)."""
     root = Path(path)
     if root.is_dir():
-        files = sorted(p for p in root.iterdir() if p.suffix in MANIFEST_SUFFIXES)
+        files = sorted(
+            p for p in root.iterdir()
+            if p.suffix in MANIFEST_SUFFIXES and (include is None or fnmatch.fnmatch(p.name, include))
+        )
         if not files:
-            raise FileNotFoundError(f"no .jsonl or .parquet manifests in {root}")
+            raise FileNotFoundError(f"no .jsonl or .parquet manifests in {root}" + (f" matching {include}" if include else ""))
         return files
     if not root.is_file():
         raise FileNotFoundError(root)
@@ -98,16 +122,33 @@ def manifest_files(path: str | Path) -> list[Path]:
     return [root]
 
 
-def plan_chunks(paths, chunk_bytes: int) -> list[Chunk]:
+def sidecar_path(sidecar: str | Path, file: str | Path) -> Path:
+    file = Path(file)
+    return Path(sidecar) / file.parent.name / file.name
+
+
+def plan_chunks(
+    paths, chunk_bytes: int, include: str | None = None, sidecar: str | None = None, blobs: str | None = None
+) -> list[Chunk]:
     chunks = []
     for path in paths:
-        for file in manifest_files(path):
+        for file in manifest_files(path, include):
             if file.suffix == ".parquet":
                 import pyarrow.parquet as pq
 
-                groups = pq.ParquetFile(file).num_row_groups
-                chunks += [Chunk(str(file), "parquet", g, g + 1) for g in range(groups)]
+                handle = pq.ParquetFile(file)
+                side = str(sidecar_path(sidecar, file)) if sidecar else None
+                blob = None
+                if embedded_audio_column(handle.schema_arrow) is not None:
+                    if not blobs:
+                        raise ValueError(f"{file} embeds audio bytes; set the source's `blobs` dir and repack it")
+                    blob = str(blob_path(blobs, file))
+                chunks += [
+                    Chunk(str(file), "parquet", g, g + 1, side, blob) for g in range(handle.num_row_groups)
+                ]
             else:
+                if sidecar:
+                    raise ValueError(f"sidecar is only supported for parquet manifests, not {file}")
                 size = file.stat().st_size
                 chunks += [
                     Chunk(str(file), "jsonl", start, min(start + chunk_bytes, size))
@@ -116,13 +157,48 @@ def plan_chunks(paths, chunk_bytes: int) -> list[Chunk]:
     return chunks
 
 
+def _sidecar_rows(chunk: Chunk, first: int, count: int) -> list[dict]:
+    import pyarrow.parquet as pq
+
+    path = Path(chunk.sidecar)
+    if not path.is_file():
+        raise FileNotFoundError(f"no sidecar {path} for {chunk.path}")
+    table = pq.read_table(path)
+    total = pq.ParquetFile(chunk.path).metadata.num_rows
+    if table.num_rows != total:
+        raise ValueError(f"sidecar {path} has {table.num_rows} rows, {chunk.path} has {total}")
+    return table.slice(first, count).to_pylist()
+
+
+def _parquet_rows(chunk: Chunk) -> Iterator[dict]:
+    import pyarrow.parquet as pq
+
+    handle = pq.ParquetFile(chunk.path)
+    meta = handle.metadata
+    first = sum(meta.row_group(g).num_rows for g in range(chunk.start))
+    audio = embedded_audio_column(handle.schema_arrow)
+    columns = None if audio is None else [n for n in handle.schema_arrow.names if n != audio]
+    rows = handle.read_row_groups(list(range(chunk.start, chunk.stop)), columns=columns).to_pylist()
+    if audio is not None:
+        check_blob(chunk.path, chunk.blob, meta.num_rows)
+        for i, row in enumerate(rows):
+            row[audio] = blob_ref(chunk.blob, first + i)
+    if chunk.sidecar:
+        for i, (row, extra) in enumerate(zip(rows, _sidecar_rows(chunk, first, len(rows)))):
+            index = extra.get("row_index")
+            if index is not None and int(index) != first + i:
+                raise ValueError(f"sidecar {chunk.sidecar} row {first + i} has row_index {index}")
+            for key in ("segment_id", "id"):
+                if key in row and key in extra and row[key] != extra[key]:
+                    raise ValueError(f"sidecar {chunk.sidecar} row {first + i}: {key} {extra[key]!r} != {row[key]!r}")
+            row.update(extra)
+    yield from rows
+
+
 def iter_rows(chunk: Chunk) -> Iterator[dict | None]:
     """Rows of one chunk; ``None`` marks a line that is not a JSON object."""
     if chunk.kind == "parquet":
-        import pyarrow.parquet as pq
-
-        table = pq.ParquetFile(chunk.path).read_row_groups(list(range(chunk.start, chunk.stop)))
-        yield from table.to_pylist()
+        yield from _parquet_rows(chunk)
         return
     with open(chunk.path, "rb") as handle:
         position = chunk.start
@@ -146,11 +222,14 @@ def iter_rows(chunk: Chunk) -> Iterator[dict | None]:
             yield row if isinstance(row, dict) else None
 
 
-def manifest_stamp(paths) -> list[tuple[str, int, int]]:
-    """(file, size, mtime_ns) per manifest file; part of the index fingerprint."""
+def manifest_stamp(paths, include: str | None = None, sidecar: str | None = None) -> list[tuple[str, int, int]]:
+    """(file, size, mtime_ns) per manifest file and its sidecar; part of the index fingerprint."""
     stamps = []
     for path in paths:
-        for file in manifest_files(path):
-            stat = file.stat()
-            stamps.append((str(file), stat.st_size, stat.st_mtime_ns))
+        for file in manifest_files(path, include):
+            for part in (file, sidecar_path(sidecar, file) if sidecar else None):
+                if part is None:
+                    continue
+                stat = part.stat()
+                stamps.append((str(part), stat.st_size, stat.st_mtime_ns))
     return stamps

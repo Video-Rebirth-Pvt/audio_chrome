@@ -1,6 +1,7 @@
-"""Data pipeline tools: build the per-source indexes, inspect the mixture, benchmark the loader.
+"""Data pipeline tools: repack embedded audio, build the per-source indexes, inspect the mixture, benchmark the loader.
 
 Run from the Chrome-10B root (the shell launchers do this):
+    bash scripts/data/repack_audio.sh --config configs/data/t2a_worldspeech.yaml
     bash scripts/data/build_index.sh                       # all sources; unchanged ones are skipped
     bash scripts/data/build_index.sh data.only=[music] data.build.force=true
     bash scripts/data/inspect_data.sh inspect.world_size=64
@@ -38,6 +39,27 @@ def _selected(cfg):
             raise SystemExit(f"unknown sources in data.only: {sorted(unknown)}")
         specs = [s for s in specs if s.name in names]
     return specs
+
+
+def cmd_repack(cfg) -> int:
+    import pyarrow.parquet as pq
+
+    from chrome.data.blobs import blob_path, embedded_audio_column, repack
+    from chrome.data.manifest import manifest_files
+
+    settings = cfg["data"]["repack"]
+    started = time.monotonic()
+    for spec in _selected(cfg):
+        if not spec.blobs:
+            continue
+        files = [f for p in spec.paths for f in manifest_files(p, spec.include) if f.suffix == ".parquet"]
+        files = [f for f in files if embedded_audio_column(pq.ParquetFile(f).schema_arrow) is not None]
+        _log(f"[repack] {spec.name}: {len(files)} parquet file(s) with embedded audio → {spec.blobs}")
+        result = repack([(f, blob_path(spec.blobs, f)) for f in files], int(settings["workers"]),
+                        bool(settings["force"]), log=_log)
+        _log(f"[repack] {spec.name}: {result['files'] - result['skipped']} written, {result['skipped']} up to date")
+    print(f"[repack] done in {time.monotonic() - started:.0f}s")
+    return 0
 
 
 def cmd_build(cfg) -> int:
@@ -226,12 +248,12 @@ def cmd_bench(cfg) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["build", "inspect", "bench"])
+    parser.add_argument("command", choices=["repack", "build", "inspect", "bench"])
     parser.add_argument("--config", default="configs/data/t2a_base.yaml")
     parser.add_argument("overrides", nargs="*", help="dotlist overrides, e.g. data.only=[music]")
-    args = parser.parse_args()
+    args = parser.parse_intermixed_args()
     cfg = load_config(ROOT / args.config, args.overrides)
-    return {"build": cmd_build, "inspect": cmd_inspect, "bench": cmd_bench}[args.command](cfg)
+    return {"repack": cmd_repack, "build": cmd_build, "inspect": cmd_inspect, "bench": cmd_bench}[args.command](cfg)
 
 
 if __name__ == "__main__":

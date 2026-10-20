@@ -1,0 +1,25 @@
+# WorldSpeech (HF parquet, audio embedded as Opus bytes) joined with the AudioFilter QA sidecars.
+# Keys beyond sources_vrfoley.yaml:
+#   include: glob on shard names in a directory path ("train-*.parquet" keeps test-* out)
+#   sidecar: <root>/<locale>/<shard>.parquet, same rows in the same order (checked by row_index / segment_id)
+#   blobs:   <root>/<locale>/<shard>.arrow, written by scripts/data/repack_audio.sh before the index build
+#   keep:    a list means "any of these values"
+#
+# Sidecar columns: row_index, segment_id, qa_risk_level (clean / medium / high), qa_risk_flags, cps_human,
+# speech_active_ratio (empty for yue_hk), text_norm, resp. Shard columns: duration, cer, snr, dnsmos_*, ...
+#
+# bash scripts/data/repack_audio.sh --config configs/data/t2a_worldspeech.yaml
+# bash scripts/data/build_index.sh --config configs/data/t2a_worldspeech.yaml
+# bash scripts/data/inspect_data.sh --config configs/data/t2a_worldspeech.yaml
+data:
+  sources:
+    - name: ws_yue_hk
+      task: speech_yue
+      include: train-*.parquet
+      sidecar: ${paths.qa_sidecar_root}
+      blobs: ${paths.audio_arrow_root}/WorldSpeech
+      columns: {caption: resp, duration: duration}
+      keep:
+        qa_risk_level: [clean, medium]
+      paths:
+        - ${paths.worldspeech_root}/yue_hk

@@ -38,6 +38,10 @@ data:
     # JSONL is split into byte ranges of this size, one per worker task.
     chunk_mb: 64
     force: false
+  # Sources with `blobs`: embedded parquet audio → Arrow. Each worker holds one decoded row group (~250 MB).
+  repack:
+    workers: 32
+    force: false
   loader:
     # One micro-batch = one packed DiT sequence: Σ(80 rows per second + caption tokens) ≤ max_tokens.
     max_tokens: 24840

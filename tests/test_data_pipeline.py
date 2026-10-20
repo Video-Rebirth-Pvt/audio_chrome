@@ -18,12 +18,15 @@ Checks:
   8. VAE batch grouping keeps order and never pads
   9. DataLoader with workers: resume continues with the next batch; validation uses holdout rows only
   9b. val quota is source-balanced: a small budget still keeps every holdout source; prefix-cutting cannot drop the last one
+  10. HF parquet with embedded audio: include glob, sidecar join (+ misaligned sidecar rejected), list keep,
+      repack to Arrow (skip when current), refs decode to the same clip, stale repack rejected
 Exits 1 if any check fails.
 """
 
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import shutil
 import sys
@@ -407,6 +410,91 @@ def check_loader(cfg) -> None:
     check_val_quota(cfg, specs, indexes)
 
 
+def check_embedded(base_cfg, tmp: Path) -> None:
+    from chrome.data.audio_io import read_audio
+    from chrome.data.blobs import blob_path, parse_blob_ref, repack
+
+    shards, sidecars = tmp / "hf" / "xx_yy", tmp / "sidecar" / "xx_yy"
+    shards.mkdir(parents=True)
+    sidecars.mkdir(parents=True)
+
+    def clip(seconds: float, rate: int, fmt: str) -> bytes:
+        buffer = io.BytesIO()
+        t = np.arange(int(seconds * rate)) / rate
+        sf.write(buffer, (0.3 * np.sin(2 * np.pi * 330 * t)).astype(np.float32), rate, format=fmt)
+        return buffer.getvalue()
+
+    shard_rows = {
+        "train-00000": ([5.0, 6.5, 3.0, 8.05], ["clean", "high", "medium", "clean"]),
+        "train-00001": ([7.0, 4.4], ["medium", "clean"]),
+        "test-00000": ([5.0], ["clean"]),
+    }
+    for stem, (durations, levels) in shard_rows.items():
+        ids = [f"{stem}_seg{i}" for i in range(len(durations))]
+        audio = [{"bytes": clip(d, 24000, "OGG" if i % 2 else "FLAC"), "path": f"{s}.opus"}
+                 for i, (d, s) in enumerate(zip(durations, ids))]
+        table = pa.table({"audio": audio, "duration": durations, "segment_id": ids, "cer": [0.0] * len(ids)})
+        pq.write_table(table, shards / f"{stem}.parquet", row_group_size=3)
+        pq.write_table(pa.table({"row_index": list(range(len(ids))), "segment_id": ids, "qa_risk_level": levels,
+                                 "resp": [f"[SPEECH]: <d>[Test] {s}</d>" for s in ids]}), sidecars / f"{stem}.parquet")
+
+    cfg = OmegaConf.merge(base_cfg, {"data": {"index_root": str(tmp / "index_hf")}})
+    cfg.data.sources = [{"name": "hf", "task": "speech", "holdout_ppm": 0, "include": "train-*.parquet",
+                         "sidecar": str(tmp / "sidecar"), "blobs": str(tmp / "blobs"),
+                         "columns": {"caption": "resp"}, "keep": {"qa_risk_level": ["clean", "medium"]},
+                         "paths": [str(shards)]}]
+    spec = source_specs(cfg)[0]
+    try:
+        build_source(spec, cfg, workers=2, log=lambda *_: None)
+        check("embedded audio needs a repack first", False)
+    except FileNotFoundError:
+        check("embedded audio needs a repack first", True)
+
+    pairs = [(f, blob_path(spec.blobs, f)) for f in sorted(shards.glob("train-*.parquet"))]
+    first = repack(pairs, workers=2, log=lambda *_: None)
+    again = repack(pairs, workers=2, log=lambda *_: None)
+    check("repack writes once, then skips", first["rows"] == 6 and first["skipped"] == 0 and again["skipped"] == 2,
+          first=first, again=again)
+
+    meta = build_source(spec, cfg, workers=2, log=lambda *_: None)
+    index = SourceIndex(Path(cfg.data.index_root) / "hf")
+    rows = {index.row(i)[1].split("] ")[-1][:-4]: index.row(i)[0] for i in range(len(index))}
+    want = {"train-00000_seg0", "train-00000_seg3", "train-00001_seg0", "train-00001_seg1"}
+    check("include + sidecar join + list keep", set(rows) == want
+          and meta["drops"].get("keep_filter") == 1 and meta["drops"].get("too_short") == 1,
+          kept=sorted(rows), drops=meta["drops"])
+    file, row = parse_blob_ref(rows["train-00000_seg3"])
+    check("ref points at the shard row", file.endswith("xx_yy/train-00000.arrow") and row == 3, ref=rows["train-00000_seg3"])
+
+    wave, rate = read_audio(rows["train-00001_seg1"])
+    check("ref decodes to the embedded clip", rate == 24000 and abs(wave.shape[-1] / rate - 4.4) < 0.05,
+          seconds=round(wave.shape[-1] / rate, 3))
+    dataset = T2ADataset([index], AudioSpec.from_config(cfg), cfg.data.tokenizer, BadAudioList(tmp / "bad_hf.txt"))
+    names = [index.row(i)[1] for i in range(len(index))]
+    item = dataset[(1, 0, names.index("[SPEECH]: <d>[Test] train-00000_seg3</d>"), 9)]
+    check("dataset crops a window from bytes", tuple(item["wave"].shape) == (2, 8 * 32000) and item["valid_samples"] == 8 * 32000,
+          shape=tuple(item["wave"].shape))
+
+    good = pq.read_table(sidecars / "train-00001.parquet")
+    bad = good.to_pydict()
+    bad["segment_id"] = bad["segment_id"][::-1]
+    pq.write_table(pa.table(bad), sidecars / "train-00001.parquet")
+    try:
+        build_source(spec, cfg, workers=2, log=lambda *_: None)
+        check("misaligned sidecar is rejected", False)
+    except ValueError:
+        check("misaligned sidecar is rejected", True)
+    pq.write_table(good, sidecars / "train-00001.parquet")
+
+    table = pq.read_table(shards / "train-00000.parquet")
+    pq.write_table(table.slice(0, 3), shards / "train-00000.parquet")
+    try:
+        build_source(spec, cfg, workers=2, force=True, log=lambda *_: None)
+        check("stale repack is rejected", False)
+    except FileNotFoundError:
+        check("stale repack is rejected", True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--keep", action="store_true", help="keep the temp dir")
@@ -425,6 +513,7 @@ def main() -> int:
         check_dataset(cfg, corpus)
         check_grouping()
         check_loader(cfg)
+        check_embedded(cfg, tmp)
     finally:
         if args.keep:
             print(f"kept {tmp}")
