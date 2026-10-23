@@ -1,0 +1,143 @@
+# T2A mixture: sources_t2a_ws.yaml (5 VR-Foley sources, hifitts2, zhizhou, WorldSpeech in 9 languages) plus
+# CommonVoice 26.0 in 16 locales (ar de en es fr it ja ko nan-tw pt ru th yue zh-CN zh-HK zh-TW). New
+# languages: Italian, Portuguese, Thai, Minnan. No weights: the loader mixes by kept train rows.
+#
+# CommonVoice: crowd-sourced read speech, mp3 at 32 / 48 kHz mono, validated clips only (train, dev and test
+# all train here; the holdout is the path hash as everywhere). Manifests come from
+# scripts/data/prepare_commonvoice.sh: es / en dialect tags follow the speaker's accent (Mexican, Argentinian,
+# Chilean, Peninsular; American, British, Indian, ...; unknown or mixed → [Spanish][Spanish] /
+# [English][English]), zh-HK is [Cantonese][Cantonese] like WorldSpeech yue_hk and CV yue. Captions keep the
+# optional gender / age tags: [Language][Dialect][Gender][Age], as zhizhou.
+#
+# Per-language CommonVoice budget, train rows of 3–20 s: en 200k (hifitts2 + WorldSpeech hold 3.5M already),
+# de / fr / es 300k each, the rest uncapped (≈1.57M CommonVoice rows in all, ~10% of the mixture). Minnan
+# (nan-tw) goes down to 2 s: 77% of it is under 3 s. holdout_ppm 2000 (ko 20000) leaves ~20+ holdout clips
+# per language for the cv validation group and the preview set.
+#
+# A list replaces, it does not merge: everything above the CommonVoice block is copied from
+# sources_t2a_ws.yaml (and the `worldspeech_source` anchor with it). Keep both in sync, or the index
+# fingerprints of the copies stop matching.
+#
+# bash scripts/data/prepare_commonvoice.sh
+# bash scripts/data/build_index.sh --config configs/train/t2a_10b_s20_ws_cv.yaml
+# bash scripts/data/inspect_data.sh --config configs/train/t2a_10b_s20_ws_cv.yaml
+worldspeech_source: &ws
+  # One val group: data.val.per_source clips for all of WorldSpeech, split evenly over languages (task);
+  # loss logs as ws/<task> and ws.
+  group: ws
+  include: "*train-*.parquet"
+  blobs: ${paths.worldspeech_root}
+  columns: {audio: audio, caption: resp, duration: duration}
+  keep:
+    qa_risk_level: [clean, medium]
+    cer: {max: 0.25, allow_missing: false}
+
+commonvoice_source: &cv
+  # One val group: 256 clips for all of CommonVoice, split evenly over languages; loss logs as cv/<task>, cv.
+  group: cv
+  columns: {caption: resp, duration: duration}
+  holdout_ppm: 2000
+
+data:
+  sources:
+    # Music and sound events keep the 4 s floor of the s20 run (and its indexes); speech follows audio.min_seconds.
+    - name: music
+      task: music
+      min_seconds: 4
+      max_records: 2000000
+      # A cut-off song plus silence sounds wrong; drop the tail instead.
+      fit: crop
+      columns: {caption: resp_new}
+      paths:
+        - ${paths.data_root}/llp/data/cleaned_jsonl_0922/cleaned_music1_train1.jsonl
+        - ${paths.data_root}/llp/data/cleaned_jsonl_0922/cleaned_music2_train.jsonl
+        - ${paths.data_root}/llp/data/cleaned_jsonl_0922/cleaned_music3_train.jsonl
+        - ${paths.data_root}/llp/data/cleaned_jsonl_0922/cleaned_music4_train.jsonl
+        - ${paths.data_root}/llp/data/cleaned_jsonl_0922/cleaned_music5_train.jsonl
+        - ${paths.data_root}/llp/data/cleaned_jsonl_0922/cleaned_music6_train.jsonl
+    - name: freesound
+      task: sfx
+      min_seconds: 4
+      max_records: 500000
+      paths:
+        - ${paths.data_root}/FreeSound/freesound.jsonl
+    - name: audioset
+      task: sfx
+      min_seconds: 4
+      max_records: 500000
+      paths:
+        - ${paths.data_root}/AudioSet/audioset_unbaltrain.jsonl
+    - name: hifitts2
+      task: speech_en
+      max_records: 3000000
+      columns: {caption: resp, duration: duration}
+      paths:
+        - ${paths.data_root}/SPEECH/hifitts-2/manifest_44khz.jsonl
+    # 16 kHz mono; nothing above 8 kHz after resampling to 32 kHz.
+    - name: zhizhou
+      task: speech_zh
+      max_records: 5000000
+      columns: {caption: resp, duration: duration}
+      keep:
+        bw_flag: ok
+        cer: {max: 0.25}
+      paths:
+        - ${paths.data_root}/zhizhou_soul/manifest_16khz.jsonl
+    # Arabic, 179k rows (Iraqi and Kuwaiti parliaments carry 93%)
+    - {<<: *ws, name: ws_ar_bh, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_bh"]}
+    - {<<: *ws, name: ws_ar_iq, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_iq"]}
+    - {<<: *ws, name: ws_ar_kw, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_kw"]}
+    - {<<: *ws, name: ws_ar_ma, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_ma"]}
+    # Chinese, 293k rows: Taiwan Mandarin (Legislative Yuan) and Cantonese (LegCo), traditional characters
+    - {<<: *ws, name: ws_zh_tw, task: speech_zh, paths: ["${paths.qa_sidecar_root}/zh_tw"]}
+    - {<<: *ws, name: ws_yue_hk, task: speech_zh, paths: ["${paths.qa_sidecar_root}/yue_hk"]}
+    # English, 735k rows (US House 622k), capped to 500k (×0.680)
+    - {<<: *ws, name: ws_en_au, task: speech_en, max_records: 4023, paths: ["${paths.qa_sidecar_root}/en_au"]}
+    - {<<: *ws, name: ws_en_jm, task: speech_en, max_records: 1335, paths: ["${paths.qa_sidecar_root}/en_jm"]}
+    - {<<: *ws, name: ws_en_ke, task: speech_en, max_records: 19837, paths: ["${paths.qa_sidecar_root}/en_ke"]}
+    - {<<: *ws, name: ws_en_nz, task: speech_en, max_records: 4526, paths: ["${paths.qa_sidecar_root}/en_nz"]}
+    - {<<: *ws, name: ws_en_sl, task: speech_en, max_records: 11803, paths: ["${paths.qa_sidecar_root}/en_sl"]}
+    - {<<: *ws, name: ws_en_us, task: speech_en, max_records: 423170, paths: ["${paths.qa_sidecar_root}/en_us"]}
+    - {<<: *ws, name: ws_en_zm, task: speech_en, max_records: 35306, paths: ["${paths.qa_sidecar_root}/en_zm"]}
+    # French, 1.21M rows, nearly all Quebec National Assembly (ca_fr committees, fr_ca plenary), capped to 500k (×0.414)
+    - {<<: *ws, name: ws_ca_fr, task: speech_fr, max_records: 425908, paths: ["${paths.qa_sidecar_root}/ca_fr"]}
+    - {<<: *ws, name: ws_fr_ca, task: speech_fr, max_records: 72264, paths: ["${paths.qa_sidecar_root}/fr_ca"]}
+    - {<<: *ws, name: ws_fr_cd, task: speech_fr, max_records: 1828, paths: ["${paths.qa_sidecar_root}/fr_cd"]}
+    # German, 230k rows: Austria and Liechtenstein only
+    - {<<: *ws, name: ws_de_at, task: speech_de, paths: ["${paths.qa_sidecar_root}/de_at"]}
+    - {<<: *ws, name: ws_de_li, task: speech_de, paths: ["${paths.qa_sidecar_root}/de_li"]}
+    # Japanese 74k, Korean 78k, Russian 38k rows
+    - {<<: *ws, name: ws_ja_jp, task: speech_ja, paths: ["${paths.qa_sidecar_root}/ja_jp"]}
+    - {<<: *ws, name: ws_ko_kr, task: speech_ko, paths: ["${paths.qa_sidecar_root}/ko_kr"]}
+    - {<<: *ws, name: ws_ru_ru, task: speech_ru, paths: ["${paths.qa_sidecar_root}/ru_ru"]}
+    # Spanish, 1.32M rows, capped to 500k (×0.378)
+    - {<<: *ws, name: ws_es_ar, task: speech_es, max_records: 13693, paths: ["${paths.qa_sidecar_root}/es_ar"]}
+    - {<<: *ws, name: ws_es_cl, task: speech_es, max_records: 100815, paths: ["${paths.qa_sidecar_root}/es_cl"]}
+    - {<<: *ws, name: ws_es_co, task: speech_es, max_records: 10238, paths: ["${paths.qa_sidecar_root}/es_co"]}
+    - {<<: *ws, name: ws_es_es, task: speech_es, max_records: 203540, paths: ["${paths.qa_sidecar_root}/es_es"]}
+    - {<<: *ws, name: ws_es_mx, task: speech_es, max_records: 70283, paths: ["${paths.qa_sidecar_root}/es_mx"]}
+    - {<<: *ws, name: ws_es_pe, task: speech_es, max_records: 26876, paths: ["${paths.qa_sidecar_root}/es_pe"]}
+    - {<<: *ws, name: ws_es_pr, task: speech_es, max_records: 17606, paths: ["${paths.qa_sidecar_root}/es_pr"]}
+    - {<<: *ws, name: ws_es_py, task: speech_es, max_records: 9872, paths: ["${paths.qa_sidecar_root}/es_py"]}
+    - {<<: *ws, name: ws_es_uy, task: speech_es, max_records: 47077, paths: ["${paths.qa_sidecar_root}/es_uy"]}
+    # ---------------------------------------------------------------- CommonVoice 26.0
+    # Capped: en 1.15M, de 637k, fr 614k, es 371k rows of 3–20 s
+    - {<<: *cv, name: cv_en, task: speech_en, max_records: 200000, paths: ["${paths.commonvoice_jsonl}/commonvoice_en_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_de, task: speech_de, max_records: 300000, paths: ["${paths.commonvoice_jsonl}/commonvoice_de_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_fr, task: speech_fr, max_records: 300000, paths: ["${paths.commonvoice_jsonl}/commonvoice_fr_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_es, task: speech_es, max_records: 300000, paths: ["${paths.commonvoice_jsonl}/commonvoice_es_26.0.resp.jsonl"]}
+    # New languages: Italian 190k, Portuguese 33k, Thai 43k, Minnan (Taiwanese Hokkien in Han characters) 15k at 2 s
+    - {<<: *cv, name: cv_it, task: speech_it, paths: ["${paths.commonvoice_jsonl}/commonvoice_it_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_pt, task: speech_pt, paths: ["${paths.commonvoice_jsonl}/commonvoice_pt_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_th, task: speech_th, paths: ["${paths.commonvoice_jsonl}/commonvoice_th_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_nan_tw, task: speech_nan, min_seconds: 2, paths: ["${paths.commonvoice_jsonl}/commonvoice_nan-tw_26.0.resp.jsonl"]}
+    # Arabic (MSA) 39k, Japanese 28k, Korean 1.6k, Russian 43k
+    - {<<: *cv, name: cv_ar, task: speech_ar, paths: ["${paths.commonvoice_jsonl}/commonvoice_ar_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_ja, task: speech_ja, paths: ["${paths.commonvoice_jsonl}/commonvoice_ja_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_ko, task: speech_ko, holdout_ppm: 20000, paths: ["${paths.commonvoice_jsonl}/commonvoice_ko_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_ru, task: speech_ru, paths: ["${paths.commonvoice_jsonl}/commonvoice_ru_26.0.resp.jsonl"]}
+    # Chinese, speech_zh as in WorldSpeech: Mandarin 45k, Taiwan Mandarin 11k, Cantonese (yue 15k, zh-HK 16k)
+    - {<<: *cv, name: cv_zh_cn, task: speech_zh, paths: ["${paths.commonvoice_jsonl}/commonvoice_zh-CN_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_zh_tw, task: speech_zh, paths: ["${paths.commonvoice_jsonl}/commonvoice_zh-TW_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_yue, task: speech_zh, paths: ["${paths.commonvoice_jsonl}/commonvoice_yue_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_zh_hk, task: speech_zh, paths: ["${paths.commonvoice_jsonl}/commonvoice_zh-HK_26.0.resp.jsonl"]}

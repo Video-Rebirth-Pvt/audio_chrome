@@ -14,6 +14,9 @@
 # bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20.yaml data.loader.subset=100 train.max_steps=20 train.run_name=t2a_10b_s20_dry
 # bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20.yaml
 # Re-running the same command resumes the newest stamp of outputs/train/t2a_10b_s20.
+# After a c10d / RendezvousConnectionError mid-save (incomplete step_* has no trainer.pt):
+#   bash scripts/train/kill_t2a.sh
+#   bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20.yaml
 # CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b_s20 infer.seconds=20 'infer.prompts=["Rain on a tin roof."]'
 # bash scripts/train/tensorboard.sh outputs/train/t2a_10b_s20
 _base_: t2a_10b.yaml

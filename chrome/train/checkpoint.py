@@ -10,9 +10,12 @@
         model.safetensors / ema.safetensors    full fp32 weights (10B default; infer reads ema)
         optimizer.pt                           full Adam state (same snapshot; needed to resume)
         trainer.pt                             step, LR schedule, DiT config, strategy; written last
+        .payload_done                          rank-0 finished model/ema/optimizer; other ranks poll this
+        .save_done                             latest pointer + prune finished; other ranks poll this
         data_rank{r}.json                      sampler state of every rank (resume the data stream)
         state/                                 optional DCP shards (train.save_sharded=true, smoke / 1B)
-    <run_dir>/samples/step_0001000/*.wav       previews
+    <run_dir>/samples/step_0001000/*.wav       generated previews
+    <run_dir>/samples/gt/                      original preview-set clips (dump_preview_gt.sh, not written by train)
 
 ``state/`` is written collectively, sharded as trained (FSDP) or deduplicated (DDP), and loads into any
 world size or strategy. ``ema`` is a complete model state dict (EMA parameters plus the model's buffers).
@@ -38,6 +41,8 @@ TRAINER = "trainer.pt"
 OPTIMIZER = "optimizer.pt"
 MODEL_FILE = "model.safetensors"
 EMA_FILE = "ema.safetensors"
+PAYLOAD_DONE = ".payload_done"
+SAVE_DONE = ".save_done"
 STAMP_FMT = "%Y%m%d_%H%M%S"
 STAMP_RE = re.compile(r"^\d{8}_\d{6}$")
 
@@ -149,6 +154,29 @@ def write_latest(run_dir: str | Path, step: int, keep: int) -> None:
             shutil.rmtree(old, ignore_errors=True)
 
 
+def drop_incomplete(run_dir: str | Path) -> list[Path]:
+    """Remove ``step_*`` dirs that never got ``trainer.pt`` (a crash mid-write). ``latest`` is untouched."""
+    root = checkpoint_root(run_dir)
+    if not root.is_dir():
+        return []
+    removed: list[Path] = []
+    for path in sorted(p for p in root.glob("step_*") if p.is_dir()):
+        if not (path / TRAINER).is_file():
+            shutil.rmtree(path, ignore_errors=True)
+            removed.append(path)
+    return removed
+
+
+def wait_for_file(path: str | Path, timeout_minutes: float, poll: float = 2.0) -> None:
+    """Poll for a file without touching NCCL. Used while rank 0 writes a 10B snapshot to shared FS."""
+    path = Path(path)
+    deadline = time.monotonic() + max(1.0, float(timeout_minutes)) * 60.0
+    while not path.is_file():
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"timed out after {timeout_minutes:.0f} min waiting for {path}")
+        time.sleep(poll)
+
+
 def save_data_state(path: Path, rank: int, state: dict) -> None:
     (path / f"data_rank{rank}.json").write_text(json.dumps(state))
 
@@ -192,9 +220,34 @@ def has_full(ckpt: Path) -> bool:
     return (ckpt / MODEL_FILE).is_file() or (ckpt / EMA_FILE).is_file()
 
 
-def save_full(ckpt: Path, model: nn.Module, optimizer=None, ema=None) -> None:
-    """Every rank calls this. Rank 0 writes one unsharded snapshot: model + ema safetensors and optimizer.pt."""
+def _write_full_files(ckpt: Path, model_state, ema_state, opt_state, log=None) -> None:
+    """Rank-0 disk I/O only. Other ranks must not sit on an NCCL barrier while this runs."""
     from safetensors.torch import save_file
+
+    def note(message: str) -> None:
+        if log is not None:
+            log(message)
+
+    def dump(name: str, payload) -> None:
+        started = time.perf_counter()
+        note(f"[ckpt] writing {name}")
+        if name.endswith(".safetensors"):
+            save_file({k: v.float().contiguous() for k, v in payload.items()}, str(ckpt / name))
+        else:
+            torch.save(payload, ckpt / name)
+        note(f"[ckpt] wrote {name} ({time.perf_counter() - started:.0f}s)")
+
+    dump(MODEL_FILE, model_state)
+    if ema_state is not None:
+        dump(EMA_FILE, ema_state)
+    if opt_state is not None:
+        dump(OPTIMIZER, opt_state)
+    (ckpt / PAYLOAD_DONE).write_text("ok\n")
+
+
+def save_full(ckpt: Path, model: nn.Module, optimizer=None, ema=None, log=None, wait_minutes: float = 120.0) -> None:
+    """Every rank calls this. Collectives gather the snapshot; rank 0 writes it. Other ranks poll
+    ``.payload_done`` instead of an NCCL barrier so a slow JuiceFS write cannot kill the TCPStore."""
     from torch.distributed.checkpoint.state_dict import get_model_state_dict, get_optimizer_state_dict
 
     options = _full_options()
@@ -204,14 +257,11 @@ def save_full(ckpt: Path, model: nn.Module, optimizer=None, ema=None) -> None:
     if ema is not None:
         with ema.swapped():
             ema_state = get_model_state_dict(model, options=options)
-    if not _rank0():
-        return
     ckpt = Path(ckpt)
-    save_file({k: v.float().contiguous() for k, v in model_state.items()}, str(ckpt / MODEL_FILE))
-    if ema_state is not None:
-        save_file({k: v.float().contiguous() for k, v in ema_state.items()}, str(ckpt / EMA_FILE))
-    if opt_state is not None:
-        torch.save(opt_state, ckpt / OPTIMIZER)
+    if _rank0():
+        _write_full_files(ckpt, model_state, ema_state, opt_state, log)
+        return
+    wait_for_file(ckpt / PAYLOAD_DONE, wait_minutes)
 
 
 def load_full(ckpt: Path, model: nn.Module, optimizer=None, ema=None) -> None:

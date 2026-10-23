@@ -1,0 +1,39 @@
+# 10B T2A at 20 s: the t2a_10b_s20_ws mixture plus CommonVoice 26.0 in 16 locales
+# (configs/data/sources_t2a_ws_cv.yaml), started from the EMA weights of t2a_10b_s20_ws. Fresh AdamW, fresh
+# data stream.
+#
+# Indexes stay in index_s20 with data.exclude = preview_set_s20.json, so every s20_ws index is reused as it
+# is; only the 16 cv_* sources are built. The CommonVoice preview clips are holdout rows, so they live only
+# in preview.set.
+#
+# Val: as s20_ws (1237 VR-Foley clips + ws 256) plus the cv group: 256 holdout clips split evenly over its
+# 13 languages (~20 each). Loss logs per language as loss/cv/speech_<lang> and in sum as loss/cv.
+# Preview / ASR: preview_set_s20_ws.json plus one CommonVoice holdout clip per language (14).
+#
+# Output: outputs/train/t2a_10b_s20_ws_cv/<YYYYMMDD_HHMMSS>/{config.yaml, log.jsonl, tb/, checkpoints/, samples/}
+#
+# bash scripts/data/prepare_commonvoice.sh                                                 # once, before indexing
+# bash scripts/data/build_index.sh --config configs/train/t2a_10b_s20_ws_cv.yaml data.build.workers=32
+# bash scripts/data/inspect_data.sh --config configs/train/t2a_10b_s20_ws_cv.yaml
+# bash scripts/train/dump_preview_gt.sh configs/train/t2a_10b_s20_ws_cv.yaml --out outputs/eval/preview_gt_s20_ws_cv   # done 2026-10-23
+# bash scripts/data/bench_loader.sh --config configs/train/t2a_10b_s20_ws_cv.yaml bench.output_dir=outputs/data/bench_ws_cv
+# bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20_ws_cv.yaml data.loader.subset=100 train.max_steps=20 train.run_name=t2a_10b_s20_ws_cv_dry
+# bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20_ws_cv.yaml
+# Re-running the same command resumes the newest stamp of outputs/train/t2a_10b_s20_ws_cv.
+# CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b_s20_ws_cv infer.seconds=8 'infer.prompts=["[SPEECH]: <d>[Italian][Italian][Female][Adult] Buongiorno a tutti, oggi parliamo della storia di Roma.</d>"]'
+# bash scripts/train/dump_preview_gt.sh outputs/train/t2a_10b_s20_ws_cv
+# bash scripts/train/tensorboard.sh outputs/train/t2a_10b_s20_ws_cv
+_base_: [t2a_10b_s20_ws.yaml, ../data/sources_t2a_ws_cv.yaml]
+
+train:
+  run_name: t2a_10b_s20_ws_cv
+  # Weights only: the latest checkpoint of the s20_ws run at launch. Pin a step (…/checkpoints/step_00NNNNN)
+  # to make the start reproducible.
+  init_from: ${paths.output_root}/train/t2a_10b_s20_ws/20261021_210505
+  init_weights: ema
+  max_steps: 100000
+  warmup_steps: 1000
+
+preview:
+  # preview_set_s20_ws.json plus one CommonVoice holdout clip per language.
+  set: configs/eval/preview_set_s20_ws_cv.json

@@ -49,7 +49,8 @@ class Generators:
 class LossOutput:
     loss: torch.Tensor
     per_sample: torch.Tensor  # [N] detached, NaN where a sample has no target rows
-    groups: torch.Tensor  # [N] index into Task.group_names (per-source metrics)
+    # [N] index into Task.group_names (per-source metrics; "<group>/<task>" names also roll up into <group>)
+    groups: torch.Tensor
 
 
 @dataclass

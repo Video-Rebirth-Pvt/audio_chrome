@@ -1,25 +1,159 @@
-# WorldSpeech (HF parquet, audio embedded as Opus bytes) joined with the AudioFilter QA sidecars.
+# WorldSpeech: audio from data/<locale>/<shard>.arrow (Opus bytes), text and QA from qa_sidecar. One source per
+# locale, all with the filters of `worldspeech_source` (a YAML anchor; a key set in a source wins).
 # Keys beyond sources_vrfoley.yaml:
-#   include: glob on shard names in a directory path ("train-*.parquet" keeps test-* out)
-#   sidecar: <root>/<locale>/<shard>.parquet, same rows in the same order (checked by row_index / segment_id)
-#   blobs:   <root>/<locale>/<shard>.arrow, written by scripts/data/repack_audio.sh before the index build
-#   keep:    a list means "any of these values"
+#   include: glob on shard names in a directory path. "*train-*" also matches the AIR / bunge / znz shard names
+#            (in_as_air-train-00000.parquet, tz_sw_bunge-train-00000.parquet) and keeps test shards out.
+#   blobs:   <root>/<locale>/<shard>.arrow; row i of qa_sidecar/<locale>/<shard>.parquet is clip i of it,
+#            checked by row count and segment_id. Written by scripts/data/migrate_audio.sh.
+#   keep:    a list means "any of these values"; {max, allow_missing} is a range.
+# Per-locale budget, on that source's line (no key: every kept row; changing a cap rebuilds only that source):
+#   max_hours: 500      train clips up to 500 h (clip seconds, as inspect reports), a fixed hash-order prefix
+#   max_records: 2e5    train rows; with both, the smaller cut wins
+#   weight: 5e4         sampling weight in rows (default: the kept train rows); no rebuild
+#   e.g. - {<<: *ws, name: ws_en_us, task: speech_en, max_hours: 500, paths: ["${paths.qa_sidecar_root}/en_us"]}
 #
 # Sidecar columns: row_index, segment_id, qa_risk_level (clean / medium / high), qa_risk_flags, cps_human,
-# speech_active_ratio (empty for yue_hk), text_norm, resp. Shard columns: duration, cer, snr, dnsmos_*, ...
+# speech_active_ratio (empty for yue_hk), text_norm, resp, audio_path, and the HF shard's duration, cer, snr,
+# dnsmos_*, human_transcript, asr_transcript, source*, session_date, language, country.
 #
-# bash scripts/data/repack_audio.sh --config configs/data/t2a_worldspeech.yaml
+# Left out: cn_ug, kh_km, la_lo, mm_my, vn_vi are metadata-only upstream (audio_in_repo: false), every clip null.
+# cs_cz and cz_cs share no segment_id but both cut psp_cz (Czech Chamber of Deputies) sessions.
+#
 # bash scripts/data/build_index.sh --config configs/data/t2a_worldspeech.yaml
+# bash scripts/data/build_index.sh --config configs/data/t2a_worldspeech.yaml data.only=[ws_yue_hk,ws_en_us]
 # bash scripts/data/inspect_data.sh --config configs/data/t2a_worldspeech.yaml
+worldspeech_source: &ws
+  # One val group: data.val.per_source clips for all of WorldSpeech, split evenly over languages (task).
+  group: ws
+  include: "*train-*.parquet"
+  blobs: ${paths.worldspeech_root}
+  columns: {audio: audio, caption: resp, duration: duration}
+  keep:
+    qa_risk_level: [clean, medium]
+    cer: {max: 0.25, allow_missing: false}
+
 data:
   sources:
-    - name: ws_yue_hk
-      task: speech_yue
-      include: train-*.parquet
-      sidecar: ${paths.qa_sidecar_root}
-      blobs: ${paths.audio_arrow_root}/WorldSpeech
-      columns: {caption: resp, duration: duration}
-      keep:
-        qa_risk_level: [clean, medium]
-      paths:
-        - ${paths.worldspeech_root}/yue_hk
+    - {<<: *ws, name: ws_af_za, task: speech_af, paths: ["${paths.qa_sidecar_root}/af_za"]}
+    - {<<: *ws, name: ws_am_et, task: speech_am, paths: ["${paths.qa_sidecar_root}/am_et"]}
+    - {<<: *ws, name: ws_ar_bh, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_bh"]}
+    - {<<: *ws, name: ws_ar_dz, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_dz"]}
+    - {<<: *ws, name: ws_ar_eg, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_eg"]}
+    - {<<: *ws, name: ws_ar_iq, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_iq"]}
+    - {<<: *ws, name: ws_ar_kw, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_kw"]}
+    - {<<: *ws, name: ws_ar_ma, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_ma"]}
+    - {<<: *ws, name: ws_ar_sa, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_sa"]}
+    - {<<: *ws, name: ws_ar_tn, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_tn"]}
+    - {<<: *ws, name: ws_ar_un, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_un"]}
+    - {<<: *ws, name: ws_as_in, task: speech_as, paths: ["${paths.qa_sidecar_root}/as_in"]}
+    - {<<: *ws, name: ws_az_az, task: speech_az, paths: ["${paths.qa_sidecar_root}/az_az"]}
+    - {<<: *ws, name: ws_be_by, task: speech_be, paths: ["${paths.qa_sidecar_root}/be_by"]}
+    - {<<: *ws, name: ws_bn_bd, task: speech_bn, paths: ["${paths.qa_sidecar_root}/bn_bd"]}
+    - {<<: *ws, name: ws_bn_in, task: speech_bn, paths: ["${paths.qa_sidecar_root}/bn_in"]}
+    - {<<: *ws, name: ws_ca_es, task: speech_ca, paths: ["${paths.qa_sidecar_root}/ca_es"]}
+    - {<<: *ws, name: ws_ca_fr, task: speech_fr, paths: ["${paths.qa_sidecar_root}/ca_fr"]}
+    - {<<: *ws, name: ws_ckb_iq, task: speech_ckb, paths: ["${paths.qa_sidecar_root}/ckb_iq"]}
+    - {<<: *ws, name: ws_cnr_me, task: speech_cnr, paths: ["${paths.qa_sidecar_root}/cnr_me"]}
+    - {<<: *ws, name: ws_crs_sc, task: speech_crs, paths: ["${paths.qa_sidecar_root}/crs_sc"]}
+    - {<<: *ws, name: ws_cs_cz, task: speech_cs, paths: ["${paths.qa_sidecar_root}/cs_cz"]}
+    - {<<: *ws, name: ws_cz_cs, task: speech_cs, paths: ["${paths.qa_sidecar_root}/cz_cs"]}
+    - {<<: *ws, name: ws_de_at, task: speech_de, paths: ["${paths.qa_sidecar_root}/de_at"]}
+    - {<<: *ws, name: ws_de_li, task: speech_de, paths: ["${paths.qa_sidecar_root}/de_li"]}
+    - {<<: *ws, name: ws_dgo_in, task: speech_dgo, paths: ["${paths.qa_sidecar_root}/dgo_in"]}
+    - {<<: *ws, name: ws_dv_mv, task: speech_dv, paths: ["${paths.qa_sidecar_root}/dv_mv"]}
+    - {<<: *ws, name: ws_el_cy, task: speech_el, paths: ["${paths.qa_sidecar_root}/el_cy"]}
+    - {<<: *ws, name: ws_el_gr, task: speech_el, paths: ["${paths.qa_sidecar_root}/el_gr"]}
+    - {<<: *ws, name: ws_en_au, task: speech_en, paths: ["${paths.qa_sidecar_root}/en_au"]}
+    - {<<: *ws, name: ws_en_jm, task: speech_en, paths: ["${paths.qa_sidecar_root}/en_jm"]}
+    - {<<: *ws, name: ws_en_ke, task: speech_en, paths: ["${paths.qa_sidecar_root}/en_ke"]}
+    - {<<: *ws, name: ws_en_nz, task: speech_en, paths: ["${paths.qa_sidecar_root}/en_nz"]}
+    - {<<: *ws, name: ws_en_pk, task: speech_en, paths: ["${paths.qa_sidecar_root}/en_pk"]}
+    - {<<: *ws, name: ws_en_sl, task: speech_en, paths: ["${paths.qa_sidecar_root}/en_sl"]}
+    - {<<: *ws, name: ws_en_us, task: speech_en, paths: ["${paths.qa_sidecar_root}/en_us"]}
+    - {<<: *ws, name: ws_en_zm, task: speech_en, paths: ["${paths.qa_sidecar_root}/en_zm"]}
+    - {<<: *ws, name: ws_eo, task: speech_eo, paths: ["${paths.qa_sidecar_root}/eo"]}
+    - {<<: *ws, name: ws_es_ar, task: speech_es, paths: ["${paths.qa_sidecar_root}/es_ar"]}
+    - {<<: *ws, name: ws_es_cl, task: speech_es, paths: ["${paths.qa_sidecar_root}/es_cl"]}
+    - {<<: *ws, name: ws_es_co, task: speech_es, paths: ["${paths.qa_sidecar_root}/es_co"]}
+    - {<<: *ws, name: ws_es_es, task: speech_es, paths: ["${paths.qa_sidecar_root}/es_es"]}
+    - {<<: *ws, name: ws_es_mx, task: speech_es, paths: ["${paths.qa_sidecar_root}/es_mx"]}
+    - {<<: *ws, name: ws_es_pe, task: speech_es, paths: ["${paths.qa_sidecar_root}/es_pe"]}
+    - {<<: *ws, name: ws_es_pr, task: speech_es, paths: ["${paths.qa_sidecar_root}/es_pr"]}
+    - {<<: *ws, name: ws_es_py, task: speech_es, paths: ["${paths.qa_sidecar_root}/es_py"]}
+    - {<<: *ws, name: ws_es_uy, task: speech_es, paths: ["${paths.qa_sidecar_root}/es_uy"]}
+    - {<<: *ws, name: ws_fa_ir, task: speech_fa, paths: ["${paths.qa_sidecar_root}/fa_ir"]}
+    - {<<: *ws, name: ws_fr_ca, task: speech_fr, paths: ["${paths.qa_sidecar_root}/fr_ca"]}
+    - {<<: *ws, name: ws_fr_cd, task: speech_fr, paths: ["${paths.qa_sidecar_root}/fr_cd"]}
+    - {<<: *ws, name: ws_fr_ci, task: speech_fr, paths: ["${paths.qa_sidecar_root}/fr_ci"]}
+    - {<<: *ws, name: ws_ga_ie, task: speech_ga, paths: ["${paths.qa_sidecar_root}/ga_ie"]}
+    - {<<: *ws, name: ws_grc_gr, task: speech_grc, paths: ["${paths.qa_sidecar_root}/grc_gr"]}
+    - {<<: *ws, name: ws_gu_in, task: speech_gu, paths: ["${paths.qa_sidecar_root}/gu_in"]}
+    - {<<: *ws, name: ws_ha_ng, task: speech_ha, paths: ["${paths.qa_sidecar_root}/ha_ng"]}
+    - {<<: *ws, name: ws_ha_td, task: speech_ha, paths: ["${paths.qa_sidecar_root}/ha_td"]}
+    - {<<: *ws, name: ws_he_il, task: speech_he, paths: ["${paths.qa_sidecar_root}/he_il"]}
+    - {<<: *ws, name: ws_hi_in, task: speech_hi, paths: ["${paths.qa_sidecar_root}/hi_in"]}
+    - {<<: *ws, name: ws_hu_hu, task: speech_hu, paths: ["${paths.qa_sidecar_root}/hu_hu"]}
+    - {<<: *ws, name: ws_hy_am, task: speech_hy, paths: ["${paths.qa_sidecar_root}/hy_am"]}
+    - {<<: *ws, name: ws_id_id, task: speech_id, paths: ["${paths.qa_sidecar_root}/id_id"]}
+    - {<<: *ws, name: ws_ig_ng, task: speech_ig, paths: ["${paths.qa_sidecar_root}/ig_ng"]}
+    - {<<: *ws, name: ws_iu_ca, task: speech_iu, paths: ["${paths.qa_sidecar_root}/iu_ca"]}
+    - {<<: *ws, name: ws_ja_jp, task: speech_ja, paths: ["${paths.qa_sidecar_root}/ja_jp"]}
+    - {<<: *ws, name: ws_ka_ge, task: speech_ka, paths: ["${paths.qa_sidecar_root}/ka_ge"]}
+    - {<<: *ws, name: ws_kk_kz, task: speech_kk, paths: ["${paths.qa_sidecar_root}/kk_kz"]}
+    - {<<: *ws, name: ws_kn_in, task: speech_kn, paths: ["${paths.qa_sidecar_root}/kn_in"]}
+    - {<<: *ws, name: ws_kok_in, task: speech_kok, paths: ["${paths.qa_sidecar_root}/kok_in"]}
+    - {<<: *ws, name: ws_ko_kr, task: speech_ko, paths: ["${paths.qa_sidecar_root}/ko_kr"]}
+    - {<<: *ws, name: ws_la_va, task: speech_la, paths: ["${paths.qa_sidecar_root}/la_va"]}
+    - {<<: *ws, name: ws_lb_lu, task: speech_lb, paths: ["${paths.qa_sidecar_root}/lb_lu"]}
+    - {<<: *ws, name: ws_mai_in, task: speech_mai, paths: ["${paths.qa_sidecar_root}/mai_in"]}
+    - {<<: *ws, name: ws_mfe_mu, task: speech_mfe, paths: ["${paths.qa_sidecar_root}/mfe_mu"]}
+    - {<<: *ws, name: ws_mi_nz, task: speech_mi, paths: ["${paths.qa_sidecar_root}/mi_nz"]}
+    - {<<: *ws, name: ws_ml_in, task: speech_ml, paths: ["${paths.qa_sidecar_root}/ml_in"]}
+    - {<<: *ws, name: ws_mn_mn, task: speech_mn, paths: ["${paths.qa_sidecar_root}/mn_mn"]}
+    - {<<: *ws, name: ws_mr_in, task: speech_mr, paths: ["${paths.qa_sidecar_root}/mr_in"]}
+    - {<<: *ws, name: ws_ms_my, task: speech_ms, paths: ["${paths.qa_sidecar_root}/ms_my"]}
+    - {<<: *ws, name: ws_ne_in, task: speech_ne, paths: ["${paths.qa_sidecar_root}/ne_in"]}
+    - {<<: *ws, name: ws_ne_np, task: speech_ne, paths: ["${paths.qa_sidecar_root}/ne_np"]}
+    - {<<: *ws, name: ws_nl_be, task: speech_nl, paths: ["${paths.qa_sidecar_root}/nl_be"]}
+    - {<<: *ws, name: ws_nl_nl, task: speech_nl, paths: ["${paths.qa_sidecar_root}/nl_nl"]}
+    - {<<: *ws, name: ws_nr_za, task: speech_nr, paths: ["${paths.qa_sidecar_root}/nr_za"]}
+    - {<<: *ws, name: ws_nso_za, task: speech_nso, paths: ["${paths.qa_sidecar_root}/nso_za"]}
+    - {<<: *ws, name: ws_om_et, task: speech_om, paths: ["${paths.qa_sidecar_root}/om_et"]}
+    - {<<: *ws, name: ws_or_in, task: speech_or, paths: ["${paths.qa_sidecar_root}/or_in"]}
+    - {<<: *ws, name: ws_pa_in, task: speech_pa, paths: ["${paths.qa_sidecar_root}/pa_in"]}
+    - {<<: *ws, name: ws_pl_pl, task: speech_pl, paths: ["${paths.qa_sidecar_root}/pl_pl"]}
+    - {<<: *ws, name: ws_pt_br, task: speech_pt, paths: ["${paths.qa_sidecar_root}/pt_br"]}
+    - {<<: *ws, name: ws_rm_ch, task: speech_rm, paths: ["${paths.qa_sidecar_root}/rm_ch"]}
+    - {<<: *ws, name: ws_ro_md, task: speech_ro, paths: ["${paths.qa_sidecar_root}/ro_md"]}
+    - {<<: *ws, name: ws_ro_ro, task: speech_ro, paths: ["${paths.qa_sidecar_root}/ro_ro"]}
+    - {<<: *ws, name: ws_ru_by, task: speech_ru, paths: ["${paths.qa_sidecar_root}/ru_by"]}
+    - {<<: *ws, name: ws_ru_ru, task: speech_ru, paths: ["${paths.qa_sidecar_root}/ru_ru"]}
+    - {<<: *ws, name: ws_rw_rw, task: speech_rw, paths: ["${paths.qa_sidecar_root}/rw_rw"]}
+    - {<<: *ws, name: ws_si_lk, task: speech_si, paths: ["${paths.qa_sidecar_root}/si_lk"]}
+    - {<<: *ws, name: ws_sm_ws, task: speech_sm, paths: ["${paths.qa_sidecar_root}/sm_ws"]}
+    - {<<: *ws, name: ws_sn_zw, task: speech_sn, paths: ["${paths.qa_sidecar_root}/sn_zw"]}
+    - {<<: *ws, name: ws_sq_al, task: speech_sq, paths: ["${paths.qa_sidecar_root}/sq_al"]}
+    - {<<: *ws, name: ws_sq_xk, task: speech_sq, paths: ["${paths.qa_sidecar_root}/sq_xk"]}
+    - {<<: *ws, name: ws_ss_za, task: speech_ss, paths: ["${paths.qa_sidecar_root}/ss_za"]}
+    - {<<: *ws, name: ws_st_za, task: speech_st, paths: ["${paths.qa_sidecar_root}/st_za"]}
+    - {<<: *ws, name: ws_sv_ax, task: speech_sv, paths: ["${paths.qa_sidecar_root}/sv_ax"]}
+    - {<<: *ws, name: ws_sw_ke, task: speech_sw, paths: ["${paths.qa_sidecar_root}/sw_ke"]}
+    - {<<: *ws, name: ws_sw_tz, task: speech_sw, paths: ["${paths.qa_sidecar_root}/sw_tz"]}
+    - {<<: *ws, name: ws_ta_in, task: speech_ta, paths: ["${paths.qa_sidecar_root}/ta_in"]}
+    - {<<: *ws, name: ws_ta_lk, task: speech_ta, paths: ["${paths.qa_sidecar_root}/ta_lk"]}
+    - {<<: *ws, name: ws_te_in, task: speech_te, paths: ["${paths.qa_sidecar_root}/te_in"]}
+    - {<<: *ws, name: ws_th_th, task: speech_th, paths: ["${paths.qa_sidecar_root}/th_th"]}
+    - {<<: *ws, name: ws_ti_et, task: speech_ti, paths: ["${paths.qa_sidecar_root}/ti_et"]}
+    - {<<: *ws, name: ws_tl_ph, task: speech_tl, paths: ["${paths.qa_sidecar_root}/tl_ph"]}
+    - {<<: *ws, name: ws_tn_bw, task: speech_tn, paths: ["${paths.qa_sidecar_root}/tn_bw"]}
+    - {<<: *ws, name: ws_tn_za, task: speech_tn, paths: ["${paths.qa_sidecar_root}/tn_za"]}
+    - {<<: *ws, name: ws_tr_tr, task: speech_tr, paths: ["${paths.qa_sidecar_root}/tr_tr"]}
+    - {<<: *ws, name: ws_ts_za, task: speech_ts, paths: ["${paths.qa_sidecar_root}/ts_za"]}
+    - {<<: *ws, name: ws_ur_in, task: speech_ur, paths: ["${paths.qa_sidecar_root}/ur_in"]}
+    - {<<: *ws, name: ws_ur_pk, task: speech_ur, paths: ["${paths.qa_sidecar_root}/ur_pk"]}
+    - {<<: *ws, name: ws_uz_uz, task: speech_uz, paths: ["${paths.qa_sidecar_root}/uz_uz"]}
+    - {<<: *ws, name: ws_ve_za, task: speech_ve, paths: ["${paths.qa_sidecar_root}/ve_za"]}
+    - {<<: *ws, name: ws_xh_za, task: speech_xh, paths: ["${paths.qa_sidecar_root}/xh_za"]}
+    - {<<: *ws, name: ws_yue_hk, task: speech_yue, paths: ["${paths.qa_sidecar_root}/yue_hk"]}
+    - {<<: *ws, name: ws_zh_tw, task: speech_zh, paths: ["${paths.qa_sidecar_root}/zh_tw"]}
+    - {<<: *ws, name: ws_zu_za, task: speech_zu, paths: ["${paths.qa_sidecar_root}/zu_za"]}

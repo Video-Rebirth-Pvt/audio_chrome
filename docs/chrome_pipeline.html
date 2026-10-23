@@ -377,28 +377,28 @@
       <span class="badge"><strong>Chrome-10B</strong></span>
       <span class="badge">32 kHz stereo · hop 800 · 40 Hz</span>
       <span class="badge">S0 codec <strong>已完成</strong></span>
-      <span class="badge">S1 数据管线 <strong>已完成</strong></span>
+      <span class="badge">S1 数据管线 <strong>已完成（含 Arrow Blob / Sidecar）</strong></span>
       <span class="badge">S2 生成链路 <strong>已完成</strong></span>
-      <span class="badge">S3 10B 预训练 <strong>进行中</strong></span>
+      <span class="badge">S3 10B 15s <strong>100k 步已完成</strong> · 20s 扩窗 <strong>训练中</strong></span>
       <span class="badge">S4–S5 后训练 / 视频 <strong>规划</strong></span>
     </div>
-    <h1>Chrome-10B 工程说明：整条 T2A 链路</h1>
+    <h1>Chrome-10B 工程说明：整条 T2A 链路与算法开发指南</h1>
     <p class="subtitle">
-      本页按<strong>当前仓库代码 + 正在跑的 10B 预训练</strong>写清整条链路：数据怎么进、VAE 吃什么吐什么、
-      Qwen 取哪一层、DiT 怎么 pack 和调制、哪些能力已经有、哪些只是预留、参数和显存/耗时花在哪。
-      每个结论都标了出处：<code>chrome/</code> 源码、<code>configs/train/t2a_10b.yaml</code>、或 <code>outputs/train/t2a_10b/log.jsonl</code> 实测。
+      本页按<strong>当前仓库最新代码框架 + 10B 预训练实测（15s 100k 步完结 &amp; 20s 扩窗续训）</strong>写清整条链路：数据怎么进、VAE 吃什么吐什么、
+      Qwen 取哪一层、DiT 怎么 pack 和调制、TensorBoard 训练监控曲线怎么读、算法开发改哪里。
+      每个结论都标了出处：<code>chrome/</code> 源码、<code>configs/train/t2a_10b*.yaml</code>、或 <code>outputs/train/t2a_10b*/log.jsonl</code> 实测。
       标「估算」的是按代码和 FLOP 推出来的，没在 GPU 上量过。
       约定对齐 MiniMax-H3，细节见 <a href="./minimax_h3_analysis.html">H3 分析笔记</a> 与 <code>skills.md</code>。
     </p>
     <div class="meta-grid">
-      <div class="meta-item"><div class="k">任务</div><div class="v">S3 T2A 10.82B 预训练中</div></div>
-      <div class="meta-item"><div class="k">输入 → 输出</div><div class="v">caption → 32 kHz 立体声 4–15 s</div></div>
+      <div class="meta-item"><div class="k">任务进展</div><div class="v">15s 100k 步完结 → 20s 扩窗中</div></div>
+      <div class="meta-item"><div class="k">输入 → 输出</div><div class="v">caption → 32 kHz 立体声 4–20 s</div></div>
       <div class="meta-item"><div class="k">参考音频 / 选择性去噪</div><div class="v">模型层预留 · 链路未接（§02）</div></div>
       <div class="meta-item"><div class="k">文本特征</div><div class="v">Qwen3-VL-32B 第 50 层输出 · 不融合</div></div>
       <div class="meta-item"><div class="k">10B 参数大头</div><div class="v">AdaLN 39% · FFN 39% · Attn 17%</div></div>
-      <div class="meta-item"><div class="k">训练</div><div class="v">8×H200 FSDP2 · 5.6 s/步 · 92.8 GB</div></div>
+      <div class="meta-item"><div class="k">训练步时与显存</div><div class="v">8×H200 FSDP2 · 5.0–5.2 s/步 · 92.8 GB</div></div>
       <div class="meta-item"><div class="k">推理显存（估算）</div><div class="v">DiT 43–65 GB + Qwen 49 GB（未命中时）</div></div>
-      <div class="meta-item"><div class="k">24h 音频</div><div class="v">约 9200 小时</div></div>
+      <div class="meta-item"><div class="k">24h 音频吞吐</div><div class="v">约 9,200–10,200 小时</div></div>
     </div>
   </header>
 
@@ -419,9 +419,11 @@
     <a href="#params">14 参数分布</a>
     <a href="#cost">15 显存与耗时</a>
     <a href="#efficiency">16 8 卡效率</a>
-    <a href="#train">17 训练框架</a>
+    <a href="#curves" style="color:var(--orange);font-weight:750">16b 训练曲线解读</a>
+    <a href="#train">17 训练框架与开发指南</a>
     <a href="#hparams">18 参数速查</a>
     <a href="#eval">19 评测</a>
+    <a href="#asr">19b Preview ASR 指标</a>
     <a href="#run">20 命令</a>
     <a href="#layout">21 目录 / 坑</a>
   </nav>
@@ -449,17 +451,22 @@
         </tr>
         <tr>
           <td>S1 数据管线</td>
-          <td>清单 → 每源一份 Arrow 索引，整秒长度策略，多源加权混合，按 token 预算打包，可续训；VR-Foley 五个源已建索引（§06）</td>
+          <td>清单 → 每源一份 Arrow 索引（支持 Parquet 内嵌音频转存 Arrow Blob 与伴生 QA 表 <code>sidecar</code> 连接），整秒长度策略，多源加权混合，按 token 预算打包，可续训；VR-Foley 五源（15s 与 20s 两套索引）及 WorldSpeech 已建索引（§06）</td>
           <td><span class="tag g">已完成</span></td>
         </tr>
         <tr>
           <td>S2 T2A 生成链路</td>
-          <td>文本编码器 + 缓存、DiT（packing / MM-RoPE / AdaLN）、flow、task / trainer（DDP / FSDP2 / HSDP）、推理、导出。骨架已按这次 10B 配方落地</td>
+          <td>文本编码器 + 缓存、DiT（packing / MM-RoPE / AdaLN）、flow、task / trainer（DDP / FSDP2 / HSDP）、TensorBoard 立体声同步、推理、导出。骨架已按 10B 配方落地</td>
           <td><span class="tag g">已完成</span></td>
         </tr>
         <tr>
-          <td>S3 10B 预训练</td>
-          <td><code>t2a_10b.yaml</code>：10.8B DiT、冻结 H3 VAE、Qwen3-VL-32B/50 + 文本缓存、单机 8×H200 FSDP2、<code>max_tokens=24840</code>。run 目录 <code>outputs/train/t2a_10b</code>（§03 / §16）</td>
+          <td>S3a 10B 预训练（4–15s）</td>
+          <td><code>t2a_10b.yaml</code>：10.82B DiT、冻结 H3 VAE、Qwen3-VL-32B/50 + 文本缓存、8×H200 FSDP2、<code>max_tokens=24840</code>。<strong>已跑满 100,000 步</strong>（<code>train loss 1.27→0.256</code>，<code>val loss=0.2634</code>，后期缓存命中 >75%，步时降至 <code>5.02 s</code>）</td>
+          <td><span class="tag g">已完成</span></td>
+        </tr>
+        <tr>
+          <td>S3b 10B 扩窗续训（4–20s）</td>
+          <td><code>t2a_10b_s20.yaml</code>：从 <code>t2a_10b</code> 第 100k 步 EMA 权重热启动，<code>audio.max_seconds=20</code>，独立索引 <code>outputs/data/index_s20</code>（纳回 15–20s 长语音），<code>outputs/train/t2a_10b_s20</code>（§16 / §16b）</td>
           <td><span class="tag o">训练中</span></td>
         </tr>
         <tr>
@@ -557,8 +564,8 @@
       <div class="a">
         <ul>
           <li><strong>显存</strong>（每卡 allocated 92.8 GB）：Qwen 48.8 GB（约 53%）&gt; FSDP 分片的权重/梯度/Adam/EMA 27.1 GB &gt; 激活约 12 GB &gt; VAE 等约 3 GB。</li>
-          <li><strong>Qwen 为什么常驻</strong>：日志 <code>text_cache</code> 计数显示，每步约 29/32 条 caption 没命中缓存，要现场跑 Qwen。第一个 epoch 里每条 caption 都是第一次出现。</li>
-          <li><strong>耗时</strong>（5.6 s/步）：DiT 前向+反传+优化 3.64 s（65%）&gt; VAE 在线编码 1.35 s（24%）&gt; Qwen 在线编码 0.56 s（10%）。见 <a href="#cost">§15</a>。</li>
+          <li><strong>Qwen 为什么常驻</strong>：只要该 rank 有任意一条 caption 未命中磁盘缓存（<code>outputs/text_cache</code>），就会懒加载 Qwen3-VL-32B/50（48.8 GB）且常驻到进程退出。在第一轮（epoch 1）未命中率约 90%，<code>text_s ≈ 0.56 s</code>；到 100k 步末期磁盘命中率升至 &gt;75%，<code>text_s</code> 降至 <code>0.07 s</code>；20s 扩窗续训时只对新出现的 15–20s 样本在线编码（约 15% miss），<code>text_s ≈ 0.14 s</code>。</li>
+          <li><strong>耗时</strong>（5.02–5.60 s/步）：DiT 前向+反传+优化 3.64 s（65–72%）&gt; VAE 在线编码 1.35 s（24–27%）&gt; Qwen 在线编码 0.07–0.56 s（1–10%）。见 <a href="#cost">§15</a> 与 <a href="#curves">§16b</a>。</li>
         </ul>
       </div>
     </div>
@@ -587,8 +594,20 @@
     <div class="qa">
       <div class="q">Q8. 能生成多长？能出单声道吗？</div>
       <div class="a">
-        <p>训练只用 4–15 s 整秒。推理 CLI 把秒数夹到 [4, 15]（<code>train/cli.py · _prompts</code>）。<code>T2APipeline</code> 本身不限制，
-        但超过 15 s 是 RoPE t 轴外推，没训练过。输出固定 2 声道（<code>audio.channels=2</code>）；需要单声道就取 L 或 (L+R)/2 做后处理。</p>
+        <p>第一阶段 <code>t2a_10b</code> 训 4–15 s 整秒（已完成 100k 步）；第二阶段 <code>t2a_10b_s20</code> 将 <code>audio.max_seconds</code> 扩到 <strong>20 s</strong>（4–20 s 整秒，正在训练）。推理 CLI 按所加载 run 的 <code>config.yaml</code> 把秒数夹到 <code>[min_seconds, max_seconds]</code>（<code>train/cli.py · _prompts</code>）。
+        输出固定 2 声道（<code>audio.channels=2</code>）；需要单声道就取 L 或 (L+R)/2 做后处理。</p>
+      </div>
+    </div>
+
+    <div class="qa">
+      <div class="q">Q9. TensorBoard 训练面板里的 <code>train/cond_s</code>、<code>train/data_s</code>、<code>train/gn/adaln</code>、<code>train/gn/condition_proj</code> 分别代表什么？</div>
+      <div class="a">
+        <ul>
+          <li><code>train/data_s</code>（稳态 <code>~0.0009 s</code>）：主进程从 12 个后台 CPU DataLoader worker 的预取队列取走一个已组装好 batch 的等待时间。<code>&lt;1 ms</code> 代表 CPU 读盘、重采样、分词 100% 被 GPU 计算掩盖。</li>
+          <li><code>train/cond_s</code>（稳态 <code>1.41–1.91 s</code>）：GPU 在 <code>no_grad</code> 下完成条件准备的总耗时，严格等于 <code>vae_s</code>（冻结 AudioVAE 按整秒分桶编码，<code>~1.35 s</code>）+ <code>text_s</code>（查缓存 + 未命中时跑 Qwen3-VL-32B/50，<code>0.07–0.56 s</code>）+ <code>pack_s</code>（<code>~0.005 s</code>）。</li>
+          <li><code>train/gn/adaln</code>（稳态 <code>~0.005–0.006</code>）：占全模型 39.2% 参数（4.25B）的所有 AdaLN 层在梯度裁剪前的 L2 梯度范数。从零训初期在 step 200 冲到 <code>0.81</code>（破除零初始化打开 gate），收敛后仅占总梯度范数（<code>~0.05</code>）的约 1/8；热启动扩窗（<code>s20</code>）时随 1000 步 LR warmup 从 <code>0.0038</code> 爬升至 <code>0.0061</code>。</li>
+          <li><code>train/gn/condition_proj</code>（稳态 <code>~0.0018</code>）：仅占 0.19% 参数（20.98M）的文本入口投影层 <code>Linear(5120→4096)</code> 的梯度范数。用于监控 ① 音频行对文本行的跨模态注意力梯度是否畅通（不为 0）；② Qwen 第 50 层第 0 个 token 的 <code>15872</code> 巨型激活（Massive Activation）是否引发梯度爆炸。完整图文拆解见 <a href="#curves">§16b 训练监控曲线深度解读</a>。</li>
+        </ul>
       </div>
     </div>
   </section>
@@ -1096,13 +1115,12 @@ text_rows [L, 5120] bf16      # 进 DiT 之前到此为止
         </ul>
       </div>
     </div>
-    <div class="callout warn">
-      <div class="title">这次 10B 的文本缓存实际命中率只有约 10%</div>
+    <div class="callout good">
+      <div class="title">文本缓存命中率随训练推进的三个实测阶段（<code>text_s</code> 从 0.56 s 降到 0.07 s）</div>
       <p style="margin:0">
-        日志 <code>text_cache</code> 计数（step 24020 → 24040，单 rank）：<code>encoded</code> +579、<code>memory</code> +59、<code>disk</code> +0，
-        即每步约 29 条 caption 现场过 Qwen，约 3 条命中内存。原因是开训前没有用 <code>cache_text.sh</code> 全量预填，
-        而第一个 epoch（约 4 万步）里每条 caption 都是第一次出现。磁盘缓存现在约 530 万条、约 3 TB（每条约 0.58 MB），全量 1010 万条约 5.9 TB。
-        第一个 epoch 跑完后重启训练，caption 基本都能从磁盘命中，Qwen 就不会再加载，每卡省 48.8 GB 显存和 0.56 s/步。
+        ① <strong><code>t2a_10b</code> 第 1 个 epoch（step 0 → 40k）</strong>：开训前未全量预填，每步约 29/32 条 caption 首次出现，现场过 Qwen 并原子写盘（<code>text_s ≈ 0.56 s</code>，<code>cond_s ≈ 1.91 s</code>，步时 <code>5.60 s</code>）。<br>
+        ② <strong><code>t2a_10b</code> 后半程（step 60k → 100k）</strong>：磁盘缓存已累积数百万条 safetensors，磁盘 + 内存命中率超过 <strong>80%</strong>（如 step 100k 单 rank 累计：<code>disk=1,738,833</code>、<code>memory=434,043</code>、<code>encoded=1,013,449</code>），每步仅 ~4 条 miss，<code>text_s</code> 降至 <strong><code>0.07 s</code></strong>，<code>cond_s</code> 降至 <strong><code>1.41 s</code></strong>，总步时缩短到 <strong><code>5.02 s</code></strong>。<br>
+        ③ <strong><code>t2a_10b_s20</code> 20s 扩窗续训（进行中）</strong>：4–15s 的样本直接命中 <code>outputs/text_cache</code> 磁盘缓存，只有新纳入的 15–20s 长语音（约占 ~15%）触发在线 Qwen 编码，<code>text_s ≈ 0.14 s</code>，<code>cond_s ≈ 1.51 s</code>，步时 <code>~5.17 s</code>。注意：只要单卡遇到哪怕 1 条 cache miss，Qwen 就会懒加载并常驻 48.8 GB 显存；若用 <code>cache_text.sh</code> 100% 预填完再启动，则 Qwen 完全不加载，每卡立省 48.8 GB 显存。
       </p>
     </div>
   </section>
@@ -1111,7 +1129,7 @@ text_rows [L, 5120] bf16      # 进 DiT 之前到此为止
   <section class="section" id="contract">
     <h2><span class="num">05</span>音频约定</h2>
     <p>
-      改动只在 <code>configs/_base_/audio_spec.yaml</code> 一处做。
+      基础契约写在 <code>configs/_base_/audio_spec.yaml</code>，20s 扩窗在 <code>configs/train/t2a_10b_s20.yaml</code> 覆盖 <code>audio.max_seconds: 20</code>。
       codec、数据、DiT 都继承它；代码换算统一走 <code>chrome/spec.py</code> 的 <code>AudioSpec</code>。
     </p>
 
@@ -1121,7 +1139,7 @@ text_rows [L, 5120] bf16      # 进 DiT 之前到此为止
       <div class="item"><div class="n">800</div><div class="l">hop = 2·4·4·5·5</div></div>
       <div class="item"><div class="n">40 Hz</div><div class="l">每耳 latent 帧率</div></div>
       <div class="item"><div class="n">32</div><div class="l">每耳通道</div></div>
-      <div class="item"><div class="n">4–15 s</div><div class="l">训练时长</div></div>
+      <div class="item"><div class="n">4–15 / 20 s</div><div class="l">训练时长（S3a / S3b）</div></div>
     </div>
 
     <table>
@@ -1130,15 +1148,15 @@ text_rows [L, 5120] bf16      # 进 DiT 之前到此为止
         <tr><td>波形</td><td>float32，峰值夹到 [-1, 1]</td><td><code>[..., C=2, N]</code></td></tr>
         <tr><td>1 秒</td><td>正好 40 帧，整秒分桶不用取整</td><td>N = 32000 · s</td></tr>
         <tr><td>latent</td><td>每声道 32 通道，连续值，不是码本</td><td><code>[..., C, 32, T]</code>，T = ceil(N / 800)</td></tr>
-        <tr><td>DiT 行</td><td>每耳每帧一行</td><td>rows = T × 2；15 s → 600 帧、1200 行</td></tr>
+        <tr><td>DiT 行</td><td>每耳每帧一行</td><td>rows = T × 2；15 s → 600 帧/1200 行；20 s → 800 帧/1600 行</td></tr>
         <tr><td>存盘</td><td><code>save_audio</code></td><td>16-bit PCM wav</td></tr>
       </tbody>
     </table>
 
     <h3>支持的训练长度</h3>
     <p>
-      契约写死 <code>min_seconds=4</code>、<code>max_seconds=15</code>。
-      1 秒 = 40 帧，训练片段只取整秒长度（4、5、…、15），裁还是补见 <a href="#data">§06</a> 的长度策略。
+      基础配置 <code>min_seconds=4</code>、<code>max_seconds=15</code>（<code>t2a_10b.yaml</code>）；扩窗配置将上限提至 <code>max_seconds=20</code>（<code>t2a_10b_s20.yaml</code>）。
+      1 秒 = 40 帧，训练片段只取整秒长度（4、5、…、15 或 20），裁还是补见 <a href="#data">§06</a> 的长度策略。
     </p>
     <table>
       <thead><tr><th>秒</th><th>采样点 N</th><th>每耳帧 T</th><th>DiT 音频行</th><th>decode 波形</th></tr></thead>
@@ -1147,7 +1165,8 @@ text_rows [L, 5120] bf16      # 进 DiT 之前到此为止
         <tr><td>5</td><td>160000</td><td>200</td><td>400</td><td>160000</td></tr>
         <tr><td>8</td><td>256000</td><td>320</td><td>640</td><td>256000</td></tr>
         <tr><td>10</td><td>320000</td><td>400</td><td>800</td><td>320000</td></tr>
-        <tr><td>15</td><td>480000</td><td>600</td><td>1200</td><td>480000</td></tr>
+        <tr><td>15（S3a 上限）</td><td>480000</td><td>600</td><td>1200</td><td>480000</td></tr>
+        <tr><td><strong>20（S3b 扩窗上限）</strong></td><td><strong>640000</strong></td><td><strong>800</strong></td><td><strong>1600</strong></td><td><strong>640000</strong></td></tr>
       </tbody>
     </table>
     <p class="dim">
@@ -1199,25 +1218,26 @@ text_rows [L, 5120] bf16      # 进 DiT 之前到此为止
       所有行都能被抽到，不再先随机截 <code>max_records</code> 子集；一个包里混合时长，按 token 预算装满；续训能接上下一个 batch。
     </p>
 
-    <h3>1. 索引（一次性，<code>scripts/data/build_index.sh</code>）</h3>
+    <h3>1. 索引与多格式清单（一次性，<code>scripts/data/build_index.sh</code> / <code>repack_audio.sh</code>）</h3>
     <ul>
-      <li>清单是 JSONL 或 Parquet，文件或目录都行。列名先用 <code>columns</code> 里配的，再退回 VR-Foley 的候选：音频 <code>path / audio / audio_filepath / wav</code>，caption <code>resp / caption / normalized_text / text</code>，时长 <code>duration / audio_duration</code>。</li>
-      <li>JSONL 按 64 MB 字节块、Parquet 按 row group，多进程扫描。每行依次检查 keep 条件、音频路径、caption、preview 排除列表、坏文件列表、时长（缺了读文件头）、长度策略、caption ≤ 512 token；每种丢弃原因都计数写进 <code>meta.json</code>。</li>
-      <li>产物 <code>outputs/data/index/&lt;source&gt;/{index.arrow, meta.json}</code>。配置和清单都没变就跳过；改 <code>weight</code> 不用重建，改了影响行内容的字段，loader 会报错，提示重建哪个源。</li>
-      <li>去重、验证集都看音频路径的 blake2b 哈希：同一路径只留一条；哈希落在每百万 <code>holdout_ppm</code>（500）以内的行留作验证，加数据不改变已有行的归属。</li>
+      <li><strong>多源清单组合（<code>data.include</code>）</strong>：<code>configs/data/t2a_base.yaml</code> 通过 <code>data.include: [sources_vrfoley.yaml]</code> 引入源列表；叠加新语料只需像 <code>configs/data/t2a_worldspeech.yaml</code> 那样追加 <code>sources_worldspeech.yaml</code>，自动按顺序合并 <code>sources</code>。</li>
+      <li><strong>列名自适应与分块并发</strong>：清单支持 JSONL 或 Parquet，文件或目录都行。列名先用 <code>columns</code> 里配的，再退回候选：音频 <code>path / audio / audio_filepath / wav</code>，caption <code>resp / caption / normalized_text / text</code>，时长 <code>duration / audio_duration</code>。JSONL 按 64 MB 字节块、Parquet 按 row group 多进程扫描。每行依次检查 <code>keep</code> 条件、音频路径、caption、preview 排除列表、坏文件列表、时长（缺了读文件头）、长度策略、caption ≤ 512 token；每种丢弃原因都计数写进 <code>meta.json</code>。</li>
+      <li><strong>伴生 QA 表按行校验连接（<code>sidecar</code>）</strong>：针对 WorldSpeech 等将质检指标分拆在同名 <code>*_qa.parquet</code> 的数据集，源配置支持 <code>sidecar: {suffix: _qa.parquet, key: id, columns: [duration, dnsmos_ovrl, ...]}</code>（<code>chrome/data/manifest.py · _join_sidecar</code>）。按 row group 读入伴生列，并<strong>逐行校验主键 <code>id</code> 完全一致</strong>后拼回主表，再统一走 <code>keep</code> 过滤。</li>
+      <li><strong>Parquet 内嵌音频零拷贝转存（<code>chrome/data/blobs.py</code> + <code>scripts/data/repack_audio.sh</code>）</strong>：HuggingFace 风格 Parquet 把音频字节嵌在 <code>audio.bytes</code> 里，训练时若直接随机读 Parquet 必须解压整个 row group，会导致 <code>data_s</code> 飙升。<code>repack_audio.sh</code> 一次性把音频字节流式转存到未压缩的 <code>*.arrow</code>（单列二进制 <code>blob</code>），并写出轻量 <code>manifest.parquet</code>（将音频列改写为虚拟 URI <code>arrow:///abs/path/part.arrow#row</code>，同时把伴生 QA 列并入）。建索引与训练时，<code>audio_io.py · _arrow_bytes</code> 通过进程级缓存的 <code>pyarrow.memory_map</code> 零拷贝切片出对应字节，再交由 <code>soundfile</code> 解码。</li>
+      <li><strong>指纹校验与确定性划分</strong>：产物存放在 <code>outputs/data/index/&lt;source&gt;/{index.arrow, meta.json}</code>（20s 扩窗使用独立目录 <code>outputs/data/index_s20</code>）。配置指纹（含 <code>min/max_seconds</code>、<code>keep</code>、<code>max_records</code>）和清单 mtime/size 都没变就跳过；改 <code>weight</code> 不用重建，改了影响行内容的字段，loader 启动会报错提示重建。去重和验证集划分都看音频路径的 blake2b 哈希：同一路径只留一条；哈希落在每百万 <code>holdout_ppm</code>（500）以内的行留作验证，加数据不改变已有行的归属。</li>
     </ul>
 
-    <h3>2. 长度策略：只出整秒</h3>
+    <h3>2. 长度策略：只出整秒（4–15 s 或 4–20 s）</h3>
     <table>
       <thead><tr><th>原始时长</th><th><code>fit: pad</code>（默认，语音 / 音效）</th><th><code>fit: crop</code>（音乐）</th></tr></thead>
       <tbody>
-        <tr><td>&lt; 4 s</td><td colspan="2">丢弃</td></tr>
-        <tr><td>超出整秒 &lt; 0.1 s（如 10.05）</td><td colspan="2">裁掉尾巴 → 10 s</td></tr>
-        <tr><td>6.5 s</td><td>补 0.5 s 静音 → 7 s，保留结尾</td><td>随机取 6 s 窗口</td></tr>
-        <tr><td>&gt; 15.1 s</td><td colspan="2"><code>long: drop</code>（默认，整段 caption 对不上片段）或 <code>long: crop</code>（随机 15 s 窗口）</td></tr>
+        <tr><td>&lt; 4 s</td><td colspan="2">丢弃（<code>too_short</code>）</td></tr>
+        <tr><td>超出整秒 &lt; 0.1 s（如 10.05 s）</td><td colspan="2">裁掉尾巴 → 10 s</td></tr>
+        <tr><td>6.5 s</td><td>补 0.5 s 静音 → 7 s，保留说话结尾</td><td>随机取 6 s 窗口</td></tr>
+        <tr><td>&gt; <code>max_seconds + 0.1</code>（15.1 s 或 20.1 s）</td><td colspan="2"><code>long: drop</code>（默认，整段 caption 对不上裁切片段）或 <code>long: crop</code>（随机取整秒窗口）</td></tr>
       </tbody>
     </table>
-    <p class="dim">整秒长度让一条样本的音频行数正好是 80 × 秒，打包代价不用估。</p>
+    <p class="dim">整秒长度让一条样本的音频行数正好是 <code>80 × 秒</code>，打包代价不用估。在 <code>t2a_10b_s20.yaml</code> 中，<code>max_seconds</code> 从 15 扩到 20，之前因 15–20 s 被 <code>too_long</code> 丢弃的长语音片段自动纳回。</p>
 
     <h3>3. 采样与打包（<code>MixtureBatchSampler</code>）</h3>
     <div class="callout">
@@ -1295,29 +1315,29 @@ for batch in loader:
       加数据源：在 <code>data.sources</code> 加一项，再 <code>bash scripts/data/build_index.sh data.only=[新源名]</code>。
     </p>
 
-    <h3>VR-Foley 五个源的实测（2026-10-12）</h3>
+    <h3>VR-Foley 五个源 + WorldSpeech 实测（含 15s 索引与 20s 扩窗索引对比）</h3>
     <table>
-      <thead><tr><th>源</th><th>任务</th><th>清单行</th><th>训练行</th><th>小时</th><th>caption token p50 / p95</th><th>权重</th><th>按时长占比</th></tr></thead>
+      <thead><tr><th>源</th><th>任务</th><th>清单扫描行</th><th>训练行（15s / 20s）</th><th>训练小时（15s / 20s）</th><th>均值秒（15s → 20s）</th><th>caption tok p50 / p95</th><th>当前 <code>max_records</code>（权重）</th></tr></thead>
       <tbody>
-        <tr><td>music</td><td>音乐</td><td>4.32M</td><td>4.30M</td><td>11,936</td><td>151 / 167</td><td>0.9</td><td>9.9%</td></tr>
-        <tr><td>freesound</td><td>音效</td><td>0.42M</td><td>0.42M</td><td>1,177</td><td>90 / 160</td><td>0.35</td><td>3.9%</td></tr>
-        <tr><td>audioset</td><td>音效</td><td>0.49M</td><td>0.49M</td><td>1,356</td><td>141 / 222</td><td>0.35</td><td>3.9%</td></tr>
-        <tr><td>hifitts2</td><td>英文语音</td><td>11.31M</td><td>8.65M</td><td>23,649</td><td>41 / 61</td><td>3.5</td><td>38.1%</td></tr>
-        <tr><td>zhizhou</td><td>中文语音</td><td>20.83M</td><td>7.01M</td><td>15,577</td><td>39 / 59</td><td>5.0</td><td><strong>44.2%</strong></td></tr>
+        <tr><td>music</td><td>音乐</td><td>4.32M</td><td>2.00M / 2.00M<br><span class="dim">（t2a_10b 当时 cap 1.2M）</span></td><td>5,551 / 5,551</td><td>9.99 → 9.99 s</td><td>151 / 167</td><td>2.0M（t2a_10b 为 1.2M）</td></tr>
+        <tr><td>freesound</td><td>音效</td><td>0.42M</td><td>0.42M / 0.42M</td><td>1,177 / 1,177</td><td>9.99 → 9.99 s</td><td>90 / 160</td><td>0.5M</td></tr>
+        <tr><td>audioset</td><td>音效</td><td>0.49M</td><td>0.49M / 0.49M</td><td>1,356 / 1,356</td><td>9.97 → 9.97 s</td><td>141 / 222</td><td>0.5M</td></tr>
+        <tr><td>hifitts2</td><td>英文语音</td><td>11.31M</td><td>4.00M / 4.00M</td><td>10,940 / <strong>12,373</strong></td><td>9.85 → <strong>11.14 s</strong></td><td>41 / 61</td><td>4.0M</td></tr>
+        <tr><td>zhizhou</td><td>中文语音</td><td>20.83M</td><td>6.94M / 7.00M</td><td>15,427 / <strong>17,156</strong></td><td>8.00 → <strong>8.82 s</strong></td><td>39 / 59</td><td>7.0M（<code>cer≤0.25</code>）</td></tr>
+        <tr><td>ws_yue_hk</td><td>粤语语音（WorldSpeech）</td><td>0.96M</td><td>0.137M（4–15s）</td><td>257</td><td>6.73 s</td><td>42 / 69</td><td>0.5M（<code>sources_worldspeech.yaml</code>）</td></tr>
       </tbody>
     </table>
     <ul>
-      <li>权重沿用 VR-Foley 的 <code>max_records</code> 比例。zhizhou 全是 16 kHz，却占 44% 时长，S2 定配比时要重点看。</li>
-      <li>主要丢弃：zhizhou 的 keep 条件（<code>bw_flag=ok</code>、<code>cer≤0.3</code>）866 万条、短于 4 s 377 万条；HiFiTTS-2 超过 15 s 172 万条、短于 4 s 93 万条。</li>
-      <li>语音 88% 的片段是补齐的（平均约 0.5 s 静音）；音乐、FreeSound、AudioSet 99% 是 10 s。</li>
-      <li>索引共 9.3 GB，64 进程 6 分钟建完，瓶颈是 caption 分词。loader 单进程 12 worker：32 batch/s、665 条/s，包填充率 96%，各源占比和权重一致。</li>
+      <li><strong>混合权重由 <code>max_records</code> 决定</strong>：当前 <code>configs/data/sources_vrfoley.yaml</code> 配比为 <code>music 2.0M : freesound 0.5M : audioset 0.5M : hifitts2 4.0M : zhizhou 7.0M</code>（合计 14.0M；注：<code>t2a_10b</code> 100k 步训练时 <code>music</code> 为 1.2M，合计 13.2M）。</li>
+      <li><strong>15s → 20s 扩窗（<code>outputs/data/index_s20</code>）带来的变化</strong>：音乐、FreeSound、AudioSet 原本 99% 是 10 s 片段，因此行内容不变；而 <code>hifitts2</code> 和 <code>zhizhou</code> 之前因 <code>&gt;15.1 s</code> 被丢弃的百万级长语音片段（16–20 s）重新进入训练集，使 <code>hifitts2</code> 均值秒数从 <code>9.85 s</code> 升至 <code>11.14 s</code>（caption p50 从 41 升至 44 tok），<code>zhizhou</code> 均值秒数从 <code>8.00 s</code> 升至 <code>8.82 s</code>。</li>
+      <li><strong>WorldSpeech Arrow Blob + Sidecar 实测（<code>ws_yue_hk</code>）</strong>：11 个 Parquet + 11 个 <code>_qa.parquet</code>（96.4 万行，40 GB），<code>repack_audio.sh</code> 19 s 转完 Arrow；经 <code>dnsmos_ovrl≥2.8 / nisqa_mos_pred≥3.0 / snr≥15 / wer≤0.2 / speech_ratio≥0.6 / speaker_count≤1</code> 质检与 4–15 s 过滤后留 13.7 万训练行（257 小时），12 worker 吞吐达 40 batch/s、1084 条/s。</li>
     </ul>
 
-    <h3>Preview 清单</h3>
+    <h3>Preview 听评集（15s 版与 20s 扩窗版）</h3>
     <p>
-      <code>configs/eval/preview_set.json</code> 共 18 条，从 VR-Foley 复制：
-      音乐 3、英文语音 2、中文语音 9（普通话男女各年龄段、四川话、粤语、台湾腔、耳语、唱歌）、FreeSound 2、AudioSet 2（鸟叫、雨声）。
-      建索引时排除这些路径。对齐检查只用其中 8 条，见 <code>configs/vae/h3_frozen.yaml</code> 的 <code>clip_labels</code>。
+      <code>configs/eval/preview_set.json</code> 共 18 条（音乐 3、英文语音 2、中文语音 9［普通话男女各年龄段、四川话、粤语、台湾腔、耳语、唱歌］、FreeSound 2、AudioSet 2［鸟叫、雨声］）。
+      <code>configs/eval/preview_set_s20.json</code> 在此基础上新增 <strong>2 条 20 秒长语音</strong>（<code>en_speech_20s</code> 与 <code>zh_speech_20s</code>，共 20 条），专门检验 <code>t2a_10b_s20</code> 在 15–20 s 区间的时间轴外推与长句吐字稳定性。
+      建索引时自动排除这些路径。VAE 对齐检查只用其中 8 条，见 <code>configs/vae/h3_frozen.yaml</code> 的 <code>clip_labels</code>。
     </p>
   </section>
 
@@ -2588,154 +2608,124 @@ decode_audio     → [2, 320000] @ 32 kHz
 
   <!-- ========== 16 ========== -->
   <section class="section" id="efficiency">
-    <h2><span class="num">16</span>这次 8 卡 10B 的训练效率</h2>
+    <h2><span class="num">16</span>这次 8 卡 10B 的训练效率（15s 100k 步全程 + 20s 扩窗）</h2>
     <p>
-      口径来自正在跑的 <code>outputs/train/t2a_10b</code>：配置是启动时写入的 <code>config.yaml</code>，
-      步时 / 显存 / 条数来自 <code>log.jsonl</code>（截至 step 24060，val 0.272 @ step 24000），机器状态来自当时的 <code>nvidia-smi</code>。
+      口径来自已完成 100,000 步的 <code>outputs/train/t2a_10b</code>（4–15s，最终 <code>val loss=0.2634</code>）与正在运行的 <code>outputs/train/t2a_10b_s20/20261020_114353</code>（4–20s 扩窗续训）。
       机器是 8×NVIDIA H200 141 GB（驱动 570 / CUDA 12.8）。
     </p>
 
     <div class="kpi">
-      <div class="item"><div class="n">5.60 s</div><div class="l">稳态中位步时</div></div>
-      <div class="item"><div class="n">31.6</div><div class="l">clips / 卡 / 步</div></div>
-      <div class="item"><div class="n">253</div><div class="l">clips / 8 卡 / 步</div></div>
+      <div class="item"><div class="n">5.60 → 5.02 s</div><div class="l">步时（前期 → 后期缓存命中）</div></div>
+      <div class="item"><div class="n">31.6 / 29.0</div><div class="l">clips / 卡 / 步（15s / 20s）</div></div>
+      <div class="item"><div class="n">253 / 232</div><div class="l">clips / 8 卡 / 步（15s / 20s）</div></div>
       <div class="item"><div class="n">281 s</div><div class="l">音频 / 卡 / 步</div></div>
-      <div class="item"><div class="n">~9200 h</div><div class="l">24h 墙钟过的音频</div></div>
+      <div class="item"><div class="n">~9200–10200 h</div><div class="l">24h 墙钟过的音频</div></div>
       <div class="item"><div class="n">92.8 G</div><div class="l">PyTorch allocated</div></div>
     </div>
 
-    <h3>1. 这次配方（和 16k 干跑对比）</h3>
+    <h3>1. 四个阶段的实测配方与耗时演进</h3>
     <table>
-      <thead><tr><th>项</th><th>开训前段 16k</th><th>当前 24.8k（这次）</th><th>从哪来</th></tr></thead>
+      <thead><tr><th>项</th><th>开训前段 16k</th><th>S3a 前期（epoch 1）</th><th>S3a 后期（step 100k）</th><th>S3b 20s 扩窗（<code>t2a_10b_s20</code>）</th></tr></thead>
       <tbody>
         <tr>
-          <td>配置</td>
-          <td><code>max_tokens=16384</code></td>
-          <td><code>data.loader.max_tokens=24840</code></td>
-          <td><code>configs/data/t2a_base.yaml</code> → 被 t2a_10b 继承</td>
-        </tr>
-        <tr>
-          <td>并行</td>
-          <td colspan="2">FSDP2 · <code>shard_size: null</code> · 激活重算 · bf16 计算 / fp32 主权重</td>
-          <td><code>train.parallel.kind=fsdp</code></td>
+          <td>配置与最大时长</td>
+          <td><code>max_tokens=16384</code> · 15s</td>
+          <td><code>max_tokens=24840</code> · 15s</td>
+          <td><code>max_tokens=24840</code> · 15s</td>
+          <td><code>max_tokens=24840</code> · <strong>20s</strong></td>
         </tr>
         <tr>
           <td>fill / clips/rank</td>
           <td>0.967 / 20.7</td>
           <td>0.976 / 31.6</td>
-          <td>日志均值</td>
+          <td>0.976 / 31.8</td>
+          <td><strong>0.973 / 29.0</strong>（单条变长）</td>
         </tr>
         <tr>
           <td>一步全局 batch</td>
           <td>~165 条</td>
           <td>~253 条</td>
-          <td>8 个独立包相加，<code>grad_accum=1</code></td>
+          <td>~254 条</td>
+          <td>~232 条（总音频秒数仍 ~280s/卡）</td>
         </tr>
         <tr>
-          <td>步时拆分</td>
-          <td>3.76 s（data 0 / cond 1.25 = VAE 0.89 + text 0.35 / model 2.46）</td>
-          <td>5.60 s 中位（cond 1.91 = VAE 1.35 + text 0.56 / model 3.64）</td>
-          <td>pack 都只有 ~5 ms，可忽略</td>
+          <td><code>cond_s</code> 拆分<br><span class="dim">（vae + text + pack）</span></td>
+          <td>1.25 s<br><span class="dim">0.89 + 0.35 + 0.005</span></td>
+          <td>1.91 s<br><span class="dim">1.35 + 0.56 + 0.005</span></td>
+          <td><strong>1.41 s</strong><br><span class="dim">1.34 + <strong>0.07</strong> + 0.005</span></td>
+          <td><strong>1.51 s</strong><br><span class="dim">1.37 + <strong>0.14</strong> + 0.005</span></td>
         </tr>
         <tr>
-          <td>allocated 峰值</td>
-          <td>82 GB</td>
-          <td>92.8 GB</td>
-          <td>日志 <code>mem_gb</code></td>
+          <td><code>model_s</code> / 总步时</td>
+          <td>2.46 s / 3.76 s</td>
+          <td>3.64 s / 5.60 s</td>
+          <td>3.62 s / <strong>5.02 s</strong></td>
+          <td>3.65 s / <strong>5.17 s</strong></td>
         </tr>
         <tr>
-          <td>token / 秒 / 卡</td>
-          <td>~4200</td>
-          <td>~4210</td>
-          <td>加大 packing 几乎不加快，只加大一步的 batch</td>
+          <td>Loss（train / val）</td>
+          <td>1.27 → 0.30 / —</td>
+          <td>0.265 / 0.272 @24k</td>
+          <td><strong>0.255 / 0.2634 @100k</strong></td>
+          <td>0.262 / 0.266 @1k（含 15–20s 新样本）</td>
         </tr>
       </tbody>
     </table>
     <div class="callout">
-      <div class="title">一步里时间花在哪（当前 24.8k）</div>
+      <div class="title">一步里时间花在哪（24.8k 配方）</div>
       <p style="margin:0">
-        model 65%（DiT 前向 + 反传 + Adam + 分片通信）·
-        VAE 24%（冻结编码器，按长度分组，串在 DiT 前面）·
-        文本 10%（每步约 29 条 caption 未命中缓存，现场跑 Qwen 再写盘）·
-        DataLoader &lt;0.1%。
-        和 1B 那次不同：10B 已经是模型算力为主，但在线 VAE 仍吃掉约四分之一墙钟。逐项拆解见 <a href="#cost">§15</a>。
+        <code>model_s</code> 3.64 s（65–72%，DiT 前向 + 反传 + Adam + 分片通信）·
+        <code>vae_s</code> 1.35 s（24–27%，冻结编码器，按整秒长度分组，串在 DiT 前面）·
+        <code>text_s</code> 0.07–0.56 s（1–10%，取决于磁盘文本缓存命中率）·
+        <code>data_s</code> &lt; 1 ms（&lt;0.02%）。
+        逐项曲线形态与诊断方法见下一节 <a href="#curves">§16b</a>。
       </p>
     </div>
 
     <h3>2. 24 小时能过多少小时音频</h3>
     <p>
       音频秒数不是「条数 × 15 s」。打包代价 = <code>80 × 秒 + caption tokens</code>，
-      混合后平均 clip 约 <strong>8.96 s</strong>（zhizhou 偏短、语音权重大），caption 约 56 tok。
-      每卡 used ≈ 0.976 × 24840 ≈ 24240 行，扣掉文本后约 22500 音频行 → <strong>每卡每步 ~281 s 音频</strong>。
+      15s 阶段混合后平均 clip 约 <strong>8.85 s</strong>（20s 阶段约 <strong>9.65 s</strong>），caption 约 56 tok。
+      每卡 used ≈ 0.976 × 24840 ≈ 24240 行，扣掉文本后约 22500 音频行 → <strong>每卡每步 ~281 s 音频</strong>（15s 和 20s 阶段每步总音频秒数几乎相等，只是 20s 阶段单条更长、条数从 31.6 降到 29.0）。
     </p>
     <table>
       <thead><tr><th>口径</th><th>算法</th><th>结果</th></tr></thead>
       <tbody>
         <tr>
           <td>纯训练步进</td>
-          <td>8 × 281 s / 5.60 s</td>
-          <td>约 <strong>401 小时音频 / 训练 1 小时</strong>；24h → ~9620 小时</td>
+          <td>8 × 281 s / (5.02~5.60 s)</td>
+          <td>约 <strong>401–447 小时音频 / 训练 1 小时</strong>；24h → ~9,620–10,700 小时</td>
         </tr>
         <tr>
           <td>计入 val / preview / ckpt</td>
-          <td>每 1000 步 val+听评约 1 min；每 2000 步写 173 GB 约 5 min。墙钟约 98 min / 1000 步</td>
-          <td>约 <strong>1.47 万步 / 24h</strong> → <strong>~9200 小时音频</strong></td>
+          <td>每 1000 步 val+听评约 1 min；每 2000 步写 173 GB 约 5 min。墙钟约 88–98 min / 1000 步</td>
+          <td>约 <strong>1.47–1.63 万步 / 24h</strong> → <strong>~9,200–10,200 小时音频</strong></td>
         </tr>
         <tr>
-          <td>条数</td>
-          <td>253 clips/步 × 14700 步</td>
-          <td>约 <strong>370 万条 / 天</strong>，相对 10.1M 训练行 ≈ <strong>0.37 epoch / 天</strong></td>
-        </tr>
-        <tr>
-          <td>跑满 <code>max_steps=100000</code></td>
-          <td>100000 / 14700 × 24h</td>
-          <td>约 <strong>6.8 天墙钟</strong>，约 2.5 个 epoch、9.2 万小时音频曝光</td>
+          <td>跑满 S3a <code>max_steps=100000</code></td>
+          <td>实测 100,000 步完成</td>
+          <td>共曝光约 <strong>2,530 万条（~6.25 万小时）立体声训练音频</strong>，最终 <code>val loss = 0.2634</code></td>
         </tr>
       </tbody>
     </table>
-    <div class="callout good">
-      <div class="title">一句话</div>
-      <p style="margin:0">
-        这台 8×H200 按当前 24.8k 配方，<strong>一天大约过 9200 小时（约 1.05 年）的立体声训练音频</strong>。
-        训练池本身 cap 之后是 25,128 小时 / 10.1M 条，一天能扫过约三分之一。
-      </p>
-    </div>
 
-    <h3>3. 数据池和一步里各源占比</h3>
+    <h3>3. 数据池和一步里各源占比（S3a 15s vs S3b 20s）</h3>
     <p>
-      混合权重是 <code>max_records</code>（不是旧 VR-Foley 的 <code>weight</code> 字段）：
-      music 0.9M / FreeSound 0.35M / AudioSet 0.35M / HiFiTTS-2 3.5M / zhizhou 5.0M。
+      混合权重由 <code>max_records</code> 决定（<code>configs/data/sources_vrfoley.yaml</code>）。下表对比 <code>t2a_10b</code>（15s，music=1.2M）与 <code>t2a_10b_s20</code>（20s，music=2.0M）的实际训练池：
     </p>
     <table>
-      <thead><tr><th>源</th><th>训练行</th><th>clip 小时</th><th>均值秒</th><th>条数占比</th><th>时长占比</th></tr></thead>
+      <thead><tr><th>源</th><th>S3a 训练行（15s）</th><th>S3b 训练行（20s）</th><th>S3b clip 小时</th><th>均值秒（15s → 20s）</th><th>S3b 条数占比</th><th>S3b 时长占比</th><th>100k 步 Val Loss</th></tr></thead>
       <tbody>
-        <tr><td>music</td><td>900,000</td><td>2,498</td><td>9.99</td><td>8.9%</td><td>9.9%</td></tr>
-        <tr><td>freesound</td><td>350,000</td><td>971</td><td>9.99</td><td>3.5%</td><td>3.9%</td></tr>
-        <tr><td>audioset</td><td>350,000</td><td>970</td><td>9.97</td><td>3.5%</td><td>3.9%</td></tr>
-        <tr><td>hifitts2</td><td>3,500,000</td><td>9,573</td><td>9.85</td><td>34.7%</td><td>38.1%</td></tr>
-        <tr><td>zhizhou</td><td>5,000,000</td><td>11,116</td><td>8.00</td><td>49.5%</td><td>44.2%</td></tr>
-        <tr><td><strong>合计</strong></td><td><strong>10,100,000</strong></td><td><strong>25,128</strong></td><td>8.96</td><td>100%</td><td>100%</td></tr>
+        <tr><td>music</td><td>1,200,000</td><td>2,000,000</td><td>5,551</td><td>9.99 → 9.99</td><td>14.4%</td><td>14.8%</td><td>0.2989</td></tr>
+        <tr><td>freesound</td><td>424,422</td><td>424,422</td><td>1,177</td><td>9.99 → 9.99</td><td>3.1%</td><td>3.1%</td><td>0.2348</td></tr>
+        <tr><td>audioset</td><td>489,540</td><td>489,540</td><td>1,356</td><td>9.97 → 9.97</td><td>3.5%</td><td>3.6%</td><td>0.3012</td></tr>
+        <tr><td>hifitts2</td><td>4,000,000</td><td>4,000,000</td><td>12,373</td><td>9.85 → <strong>11.14</strong></td><td>28.8%</td><td>32.9%</td><td>0.2361</td></tr>
+        <tr><td>zhizhou</td><td>6,939,693</td><td>7,000,000</td><td>17,156</td><td>8.00 → <strong>8.82</strong></td><td>50.3%</td><td>45.6%</td><td>0.2409</td></tr>
+        <tr><td><strong>合计</strong></td><td><strong>13,053,655</strong></td><td><strong>13,913,962</strong></td><td><strong>37,613</strong></td><td>8.85 → <strong>9.73</strong></td><td>100%</td><td>100%</td><td><strong>0.2634</strong></td></tr>
       </tbody>
     </table>
-    <p class="dim">
-      zhizhou 全是 16 kHz，升到 32 kHz 后 8 kHz 以上没有能量，却占 44% 时长。S2 消融里要看配比；这次 10B 仍按该配比在训。
-    </p>
 
     <h3>4. 资源占用（8×H200）</h3>
-    <p>nvidia-smi 瞬时（训练稳态、8 个 python rank）：</p>
-    <table>
-      <thead><tr><th>卡</th><th>已用 / 141 GB</th><th>GPU-Util</th><th>功耗 / 700 W</th><th>温度</th></tr></thead>
-      <tbody>
-        <tr><td>0</td><td>105 GB</td><td>93–98%</td><td>~630 W</td><td>69°C</td></tr>
-        <tr><td>1</td><td>101 GB</td><td>97–100%</td><td>~600 W</td><td>60°C</td></tr>
-        <tr><td>2</td><td>121 GB</td><td>99–100%</td><td>~600 W</td><td>58°C</td></tr>
-        <tr><td>3</td><td>102 GB</td><td>96–100%</td><td>~640 W</td><td>69°C</td></tr>
-        <tr><td>4</td><td>122 GB</td><td>94–99%</td><td>~650 W</td><td>71°C</td></tr>
-        <tr><td>5</td><td>104 GB</td><td>99–100%</td><td>~610 W</td><td>64°C</td></tr>
-        <tr><td>6</td><td>122 GB</td><td>95–100%</td><td>~625 W</td><td>68°C</td></tr>
-        <tr><td>7</td><td>122 GB</td><td>94–99%</td><td>~635 W</td><td>63°C</td></tr>
-      </tbody>
-    </table>
     <div class="mem-bar" title="一张卡 141 GB 怎么分">
       <span style="flex:48.8;background:#c4a0ff">Qwen 48.8G</span>
       <span style="flex:27.1;background:#ff8a4c">DiT 分片状态 27.1G</span>
@@ -2744,7 +2734,7 @@ decode_audio     → [2, 320000] @ 32 kHz
       <span style="flex:27;background:rgba(148,163,184,.35);color:#e8eefc">空 16–38G</span>
     </div>
     <p class="dim">
-      前三段加起来约 92.8 GB（PyTorch <code>max_memory_allocated</code>），拆分见 <a href="#cost">§15</a>；nvidia-smi 的 101–125 GB 还包括缓存池和 NCCL 缓冲，各卡参差。
+      前三段加起来约 92.8 GB（PyTorch <code>max_memory_allocated</code>），拆分见 <a href="#cost">§15</a>；nvidia-smi 的 101–125 GB 还包括缓存池和 NCCL 缓冲。
       空闲大约 16–38 GB，再加 <code>max_tokens</code> 或关掉激活重算都会 OOM。
     </p>
     <table>
@@ -2763,7 +2753,7 @@ decode_audio     → [2, 320000] @ 32 kHz
         <tr>
           <td>CPU / 读盘</td>
           <td>12 worker × 8 rank，prefetch 4</td>
-          <td><code>data_s≈0.8 ms</code>，不是瓶颈。文本 0.56 s 主要是 Qwen 在线编码，不是读盘</td>
+          <td><code>data_s≈0.8 ms</code>，不是瓶颈。文本耗时来自未命中缓存时的 Qwen 在线编码，不是读盘</td>
         </tr>
         <tr>
           <td>Checkpoint</td>
@@ -2773,56 +2763,290 @@ decode_audio     → [2, 320000] @ 32 kHz
         <tr>
           <td>Val / Preview</td>
           <td>每 1000 步</td>
-          <td>val 打完全部 holdout（5×256，<code>val_batches=0</code>）；preview 18 条 Euler 50 + CFG 4，EMA 权重</td>
-        </tr>
-        <tr>
-          <td>Loss 轨迹</td>
-          <td>train 1.27 → 0.26；val 0.31 → 0.27（step 23k）</td>
-          <td>按源：freesound 最低，music / audioset 仍明显高于语音</td>
+          <td>val 打完全部 holdout（5×256，<code>val_batches=0</code>）；preview 18/20 条 Euler 50 + CFG 4，EMA 权重</td>
         </tr>
       </tbody>
     </table>
 
-    <h3>5. 还能量多少</h3>
-    <ul>
-      <li><strong>不要在 Qwen 常驻时再加 max_tokens</strong>：24.8k 已经把 allocated 顶到 93 GB、个别 rank nvidia-smi 122 GB / 141 GB。</li>
-      <li><strong>最快的加速</strong>仍是把 VAE 移出关键路径（latent 缓存，或另一个 CUDA stream 和 DiT 重叠）。当前 1.35 s / 5.60 s ≈ 24%；拿掉后步时大约 4.3 s，24h 音频能到 ~1.2 万小时。</li>
-      <li><strong>Qwen 下线</strong>：文本 0.56 s 和每卡 48.8 GB 都来自缓存未命中时的在线 Qwen。第一个 epoch（约 4 万步）跑完后重启，或者另找空卡用 <code>cache_text.sh</code> 把剩下的 caption 预填完，再重启训练，Qwen 就不再加载。省下的显存可以加 <code>max_tokens</code>，但要另开 run（会改变封包）。</li>
-      <li>多机：<code>NNODES=N shard_size=8</code> 做 HSDP。一步全局 batch 按节点数线性放大，单卡步时几乎不变，24h 音频按节点数倍增。</li>
-    </ul>
-
-    <h3>可执行命令</h3>
-<pre># 这次 10B：单机 8 卡 FSDP，续训当前 run
-cd /mnt/data04/480634/728342682@qq.com/1_CODE/AUDIO/PreTrain/Chrome-10B
+    <h3>5. 可执行命令（15s 与 20s 扩窗）</h3>
+<pre># S3a 15s 预训练（100k 步已完成）
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 NPROC=8 \
   bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml
 
-# 新开一次（目录带时间戳）
+# S3b 20s 扩窗训练（先建 20s 索引，再从 100k EMA 权重热启动）
+bash scripts/data/build_index.sh configs/train/t2a_10b_s20.yaml
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 NPROC=8 \
-  bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml train.resume=null
+  bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20.yaml
 
-# 看吞吐、loss、显存（log.jsonl 每 20 步一条）
-tail -f outputs/train/t2a_10b/log.jsonl
+# TensorBoard：同时对比 15s 与 20s 的标量曲线和立体声试听
+bash scripts/train/tensorboard.sh outputs/train
 
-# TensorBoard：loss / 步时 / preview wav
-bash scripts/train/tensorboard.sh outputs/train/t2a_10b
-
-# 听评
-ls outputs/train/t2a_10b/samples/step_0023000/
-
-# 推理（读最新 EMA）
-CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b \
-  'infer.prompts=["Heavy rain on a tin roof."]'
-
-# 多机示例（每台各跑一次）
-NNODES=4 NODE_RANK=0 MASTER_ADDR=&lt;node0&gt; \
-  bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml train.parallel.shard_size=8
+# 清理中断残留的孤儿训练进程
+bash scripts/train/kill_t2a.sh
 </pre>
+  </section>
+
+  <!-- ========== 16b ========== -->
+  <section class="section" id="curves">
+    <h2><span class="num">16b</span>训练监控曲线深度解读（结合 TensorBoard 实测）</h2>
+    <p>
+      本节结合 <code>t2a_10b_s20</code>（4–20 s 扩窗训练，run 目录 <code>outputs/train/t2a_10b_s20/20261020_114353</code>）在 <strong>step 0 → 1280（墙钟 1.86 小时）</strong>的真实 TensorBoard 监控面板，
+      逐一拆解图中<strong>红框标出的四个核心指标（<code>train/cond_s</code>、<code>train/data_s</code>、<code>train/gn/adaln</code>、<code>train/gn/condition_proj</code>）</strong>以及同面板的 <code>train/batch_id</code>、<code>train/fill</code>。
+      所有指标均由 <code>chrome/train/trainer.py</code> 每 <code>log_every=20</code> 步对 8 张卡求均值写入 <code>log.jsonl</code>，并由 <code>chrome/train/tensorboard.py</code> 同步到 TensorBoard。
+    </p>
+
+    <div class="fig">
+      <img src="assets/tb_curves_s20.png" alt="TensorBoard 训练监控曲线（step 0-1280）" style="width:100%;max-width:1100px;display:block;margin:0 auto;border-radius:12px;border:1px solid var(--border)" />
+      <p class="fig-title">
+        图 6b · <code>outputs/train/t2a_10b_s20/20261020_114353</code> 在 step 1280 时的 TensorBoard 实测面板。
+        该条日志在 <code>log.jsonl</code> 中的完整原始记录为：
+        <code>{"step": 1280, "batch_id": 1280, "lr": 0.0001, "sec_per_step": 5.2218, "cond_s": 1.5149, "vae_s": 1.3675, "text_s": 0.1423, "pack_s": 0.0049, "data_s": 0.000866, "model_s": 3.6532, "fill": 0.9731, "samples": 28.37, "grad_norm": 0.0488, "gn/adaln": 0.006128, "gn/condition_proj": 0.00182, "loss": 0.2619}</code>。
+      </p>
+    </div>
+
+    <h3>总览：一步训练的时间切片与梯度探针</h3>
+    <div class="fig">
+      <svg class="dg" viewBox="0 0 1120 220" role="img" aria-label="单步时间与梯度探针拆解">
+        <rect class="zone" x="14" y="14" width="1092" height="92" rx="12"/>
+        <text class="lane" x="28" y="34">单步耗时拆解：sec_per_step = 5.2218 s（trainer.py 第 248–280 行）</text>
+
+        <rect class="box" x="28" y="44" width="90" height="48" rx="8" style="stroke:#ff7b72;stroke-width:1.8"/>
+        <text class="t" x="36" y="64" style="fill:#ff7b72">data_s</text>
+        <text class="m" x="36" y="82">0.0009 s</text>
+
+        <rect class="ice" x="130" y="44" width="320" height="48" rx="8" style="stroke:#ff7b72;stroke-width:1.8"/>
+        <text class="t" x="142" y="64" style="fill:#ff7b72">cond_s = 1.5149 s（29.0%）</text>
+        <text class="m" x="142" y="82">vae 1.3675s + text 0.1423s + pack 0.0049s</text>
+
+        <rect class="hot" x="462" y="44" width="630" height="48" rx="8"/>
+        <text class="t" x="476" y="64">model_s = 3.6532 s（70.0% · DiT 前向 + 激活重算 + 反传 + 梯度裁剪 + AdamW + EMA）</text>
+        <text class="m" x="476" y="82">在这段末尾、clip_grad_norm(1.0) 之前，采样全模型 grad_norm 与两个分组探针 ↓</text>
+
+        <rect class="zone" x="14" y="118" width="1092" height="88" rx="12"/>
+        <text class="lane" x="28" y="138">梯度 L2 范数探针（裁剪前真实值 · trainer.py 第 270–274 行 &amp; tasks/t2a.py 第 117–123 行）</text>
+
+        <rect class="box" x="28" y="148" width="330" height="46" rx="8"/>
+        <text class="t" x="40" y="167">全模型 train/grad_norm = 0.0488</text>
+        <text class="s" x="40" y="184">10.822B 参数（100%）· 主干 Attn+FFN 占 ~98% 梯度平方能量</text>
+
+        <rect class="hot" x="374" y="148" width="356" height="46" rx="8" style="stroke:#ff7b72;stroke-width:1.8"/>
+        <text class="t" x="386" y="167" style="fill:#ff7b72">红框 · train/gn/adaln = 0.0061</text>
+        <text class="s" x="386" y="184">4.247B 参数（占 39.2%）· 监控时间步调制门控与 warmup 步长响应</text>
+
+        <rect class="op" x="746" y="148" width="346" height="46" rx="8" style="stroke:#ff7b72;stroke-width:1.8"/>
+        <text class="t" x="758" y="167" style="fill:#ff7b72">红框 · train/gn/condition_proj = 0.0018</text>
+        <text class="s" x="758" y="184">20.98M 参数（仅占 0.19%）· 监控跨模态文本通路与 Qwen 巨型激活冲击</text>
+      </svg>
+    </div>
+
+    <h3>红框 1 · <code>train/cond_s</code>（截图值：<code>1.5149 s</code>，波动区间 <code>1.48 ~ 1.515 s</code>）</h3>
+    <div class="card" style="margin-bottom:16px">
+      <h4>1. 代码定义与精确构成</h4>
+      <p>
+        在 <code>chrome/train/trainer.py</code> 第 250–262 行中，<code>cond_s</code> 测量的是 <code>prepared = self.task.prepare(batch)</code> 的端到端墙钟时间。
+        进入 <code>chrome/tasks/t2a.py · encode_t2a</code>（第 44–53 行）后，它在 <code>@torch.no_grad()</code> 下<strong>串行执行三件事</strong>，满足恒等式：
+      </p>
+      <pre style="margin:8px 0">cond_s  =  vae_s (1.3675 s, 90.3%)  +  text_s (0.1423 s, 9.4%)  +  pack_s (0.0049 s, 0.3%)  =  1.5149 s</pre>
+      <ul>
+        <li><strong><code>vae_s ≈ 1.35–1.37 s</code>（占 <code>cond_s</code> 的 90%）</strong>：冻结的 H3 Audio VAE 编码器在 GPU 上以 fp32（禁 TF32）在线编码本卡约 29 条立体声波形（合计约 280 秒音频）。由于不同秒数的波形补零混编会污染末尾 ~10 帧 latent（见 §06），<code>encode_waves</code> 按整秒长度（4..20 s）分桶依次跑编码器前向。</li>
+        <li><strong><code>text_s ≈ 0.14 s</code>（占 <code>cond_s</code> 的 9.4%）</strong>：<code>CachedTextEncoder</code> 依次查本进程内存 LRU（4096 条）→ 磁盘 <code>outputs/text_cache/*.safetensors</code> → 未命中时跑冻结的 Qwen3-VL-32B（前 50 层）并原子写盘。</li>
+        <li><strong><code>pack_s ≈ 0.005 s</code>（0.3%）</strong>：<code>T2ALayout.pack</code> 在 CPU 上生成 <code>token_tags</code>、fp64 3D RoPE 坐标 <code>positions</code>、<code>cu_seqlens</code> 并搬上 GPU。</li>
+      </ul>
+      <h4>2. 为什么曲线形态是「step 20 尖峰 → 稳态在 1.48~1.51 s 窄幅锯齿震荡」？</h4>
+      <ul>
+        <li><strong>左侧起点冲顶尖峰（step 20 达 <code>2.93 s</code>）</strong>：训练刚启动时，各 rank 首次遇到未缓存的 caption，触发 <code>Qwen3VLTextEncoder._load()</code> 从磁盘读取 48.8 GB 的前 50 层权重，这笔一次性懒加载耗时被平摊进了首个 20 步窗口的 <code>text_s</code> 和 <code>cond_s</code>。</li>
+        <li><strong>为什么在 <code>t2a_10b_s20</code> 中是 <code>1.50 s</code>（对比 15s 开训时的 <code>1.91 s</code> 和 15s 100k 步末期的 <code>1.41 s</code>）</strong>：完全由<strong>新增 15–20 s 样本的文本缓存未命中率</strong>决定！在 <code>s20</code> 的 step 1280 处，单卡累计 <code>disk=28,167</code>（4–15 s 老样本直接命中 100k 步留下的磁盘缓存）、<code>memory=3,732</code>、<code>encoded=5,385</code>（新纳入的 15–20 s 语音样本从未见过，约占 <strong>14.4%</strong>）。每步每卡约有 4 条新 caption 需要现场跑 Qwen，耗时约 <code>0.14 s</code>；加上恒定的 <code>vae_s ≈ 1.36 s</code>，正好落在 <code>1.50 s</code>。</li>
+        <li><strong>~30 ms 的上下锯齿</strong>：① 每包内抽到的 15–20 s 未缓存新样本条数随机波动；② 每包内 4–20 s 出现的不同整秒桶数不同（桶越多，VAE 小 batch kernel 启动次数越多）。</li>
+      </ul>
+      <h4>3. 算法开发怎么看这条线</h4>
+      <p style="margin:0">
+        <code>cond_s</code> 占了总步时的 <strong>29%</strong>，且其中 90% 是 <code>vae_s</code>。若做小模型（如 1B）架构消融，<code>cond_s</code> 甚至会超过 <code>model_s</code> 成为第一瓶颈。改进方向：在 <code>T2ATask.prepare</code> 中支持离线 latent 缓存或用独立 CUDA stream 将下一步的 <code>encode_waves</code> 与当前步的 <code>model_s</code> 异步重叠，可直接削去 ~1.35 s/步。
+      </p>
+    </div>
+
+    <h3>红框 2 · <code>train/data_s</code>（截图值：<code>0.0009 s</code>，纵轴范围 <code>8e-4 ~ 9e-4 s</code>）</h3>
+    <div class="card" style="margin-bottom:16px">
+      <h4>1. 代码定义：为什么读 29 条音频只花 0.9 毫秒？</h4>
+      <p>
+        在 <code>chrome/train/trainer.py</code> 第 248–258 行中，<code>data_s</code> 测量的是主进程执行 <code>batch = next(data_iter)</code> 的阻塞等待时间。
+        <strong>它测的不是 CPU 从硬盘读音频的实际耗时，而是「GPU 消费速度 vs CPU 预取生产速度」的差值！</strong>
+      </p>
+      <ul>
+        <li>每个 GPU rank 背后有 <code>num_workers=12</code> 个常驻 CPU 进程（<code>prefetch_factor=4, persistent_workers=True, pin_memory=True</code>）。</li>
+        <li>当 GPU 在跑前一步的 <code>cond_s + model_s</code>（共 <strong>5.2 秒</strong>）时，12 个 CPU worker 早已在后台并发完成了：<code>Arrow mmap 寻址 → soundfile 窗口 seek（或 arrow:// 零拷贝切片）→ to_stereo → 32kHz sinc 重采样（核缓存）→ 0.95 峰值限制 → H3 tokenizer 分词</code>，并把组装好的 <code>collate_t2a</code> 字典放进了共享内存的预取队列。</li>
+        <li>因此主进程调用 <code>next(data_iter)</code> 时直接从队首拿走现成引用，只花 <strong><code>0.8 ~ 0.9 ms</code>（占单步时间的 0.017%）</strong>。</li>
+      </ul>
+      <h4>2. 曲线形态与工程故障诊断</h4>
+      <ul>
+        <li><strong>正常形态（如图）</strong>：仅在 step 20 有一根冲出画面的竖线（<code>0.315 s</code>，worker 进程首次 fork 与初始化重采样核的冷启动），此后全程贴在 <code>8e-4 ~ 9e-4 s</code>（亚毫秒级），证明 <strong>IO 与 CPU 预处理被 100% 掩盖，GPU 零饥饿</strong>。</li>
+        <li><strong>异常报警（开发新数据管线必看）</strong>：如果加入新数据源或在线数据增强后，看到 <code>train/data_s</code> 从 <code>1e-3</code> 抬升到 <code>&gt; 0.05 s</code> 甚至出现周期性大尖峰，说明后台 12 个 worker 产速跟不上 GPU。常见原因：① 直接读取了未用 <code>repack_audio.sh</code> 转存的 HuggingFace 内嵌音频 Parquet（每次随机读被迫解压整个 row group）；② MP4/压缩音频未走窗口 seek 而触发了全文件 ffmpeg 软解；③ 在 <code>T2ADataset.__getitem__</code> 里写了未缓存的慢速算子。</li>
+      </ul>
+    </div>
+
+    <h3>红框 3 · <code>train/gn/adaln</code>（截图值：<code>0.0061</code>，呈先下探至 <code>0.0038</code> 再随 warmup 爬升至 <code>0.0063</code>）</h3>
+    <div class="card" style="margin-bottom:16px">
+      <h4>1. 代码定义与精确计算时机</h4>
+      <p>
+        在 <code>chrome/tasks/t2a.py</code> 第 117–123 行中，<code>T2ATask.grad_groups</code> 将所有参数名包含 <code>"adaln"</code> 的可训练参数归入该组（包括 28 个主干块的 <code>blocks.*.adaln_proj.linear</code> 和最终层的 <code>final_layer.adaln_proj.linear</code>，合计 <strong>4.247B 参数，占全模型 10.822B 的 39.24%</strong>）。
+        每 <code>log_every=20</code> 步，在反传结束、<strong>全局梯度裁剪 <code>clip_grad_norm(1.0)</code> 之前</strong>，<code>trainer.py</code> 第 270–273 行调用 <code>parallel.grad_sq_norm(params).sqrt()</code>，在 fp32 下跨 8 卡 FSDP 分片做 all-reduce 求精确的未裁剪 L2 范数：
+        <code>gn/adaln = sqrt( Σ_{p ∈ AdaLN} ||∇_p L||_2^2 )</code>。
+      </p>
+      <h4>2. 核心追问：为什么图中曲线先从 <code>0.0062</code> 掉到 <code>0.0038</code>（step 40–400），又一路爬升到 <code>0.0063</code>（step 400–1280）？</h4>
+      <p>
+        要把这条曲线看懂，必须对比<strong>「从零训练（<code>t2a_10b</code>）」</strong>与<strong>「100k 步 EMA 热启动扩窗（<code>t2a_10b_s20</code>，即本图）」</strong>两种截然不同的物理过程：
+      </p>
+      <table>
+        <thead><tr><th>阶段</th><th>从零训练 <code>t2a_10b</code> 的 <code>gn/adaln</code></th><th>热启动扩窗 <code>t2a_10b_s20</code>（本图）的 <code>gn/adaln</code></th><th>背后的动力学机制</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Step 1–20</strong><br><span class="dim">起步破缺</span></td>
+            <td><code>0.0000 → 0.0008</code></td>
+            <td><code>0.0062</code>（step 20）</td>
+            <td>从零训时 <code>adaln_proj</code> 与 <code>audio_out</code> 均为 <strong>0 初始化（AdaLN-Zero）</strong>，第 1 步梯度严格为 0；而 <code>s20</code> 加载了已训满 100k 步的 EMA 权重，门早已打开，一上来就有正常梯度。</td>
+          </tr>
+          <tr>
+            <td><strong>Step 40–350</strong><br><span class="dim">Warmup 前段</span></td>
+            <td>暴涨至峰值 <strong><code>0.50 ~ 0.81</code></strong>（step 140–260）</td>
+            <td>回落至谷底 <strong><code>0.0038 ~ 0.0046</code></strong></td>
+            <td>从零训时输出头刚破除对称性，模型拼命打开 28 层 gate 并建立粗粒度时间步调制，梯度出现巨峰；而 <code>s20</code> 虽然换上了全新的 AdamW（一阶/二阶动量 m,v 清零），但处于 <strong>1000 步线性 LR warmup 的低学习率区（<code>lr = 4e-6 ~ 3.5e-5</code>）</strong>，参数还停留在 15s EMA 权重的平滑极小值盆地中心，梯度自然处于低位。</td>
+          </tr>
+          <tr>
+            <td><strong>Step 400–1000</strong><br><span class="dim">Warmup 爬坡</span></td>
+            <td>从 <code>0.40</code> 快速衰减至 <code>0.05</code></td>
+            <td>随 LR 线性放大，从 <strong><code>0.0040</code> 单调爬升至 <code>0.0063</code></strong></td>
+            <td>在 <code>s20</code> 中，随着学习率从 <code>4e-5</code> 升至满额 <code>1e-4</code>（step 1000 完成 warmup），优化器步长变大，把参数推离 15s 旧盆地以适应新加入的 15–20s 长语音分布，因此梯度范数与学习率同步抬升。</td>
+          </tr>
+          <tr>
+            <td><strong>Step 1000+</strong><br><span class="dim">满 LR 稳态</span></td>
+            <td>在 20k–100k 步长期稳定于 <strong><code>0.0045 ~ 0.0060</code></strong></td>
+            <td>在 step 1000 后进入平台期 <strong><code>0.0050 ~ 0.0063</code></strong></td>
+            <td>到达满学习率 <code>1e-4</code> 的动态平衡，与 <code>t2a_10b</code> 后半程的稳态量级完全一致。</td>
+          </tr>
+        </tbody>
+      </table>
+      <h4>3. 对算法开发的启示：为什么 39.2% 的参数只产生 ~1.5% 的梯度能量？</h4>
+      <p style="margin:0">
+        在稳态下，全模型总梯度范数 <code>grad_norm ≈ 0.049</code>（平方和 <code>≈ 2.4e-3</code>），而占了 <strong>39.24% 参数量（4.25B）</strong>的 AdaLN 梯度范数只有 <code>0.0061</code>（平方和 <code>≈ 3.7e-5</code>，仅占全模型梯度平方能量的 <strong>1.5%</strong>）！
+        原因在于：AdaLN 的输入只是标量时间步 <code>t ∈ [0,1]</code> 的正弦嵌入（自由度极低），一旦学好随噪声水平 <code>σ</code> 平滑缩放的曲线，它的梯度就会大幅收敛；中后期 98% 以上的梯度都在更新主干 Attention 与 SwiGLU FFN。
+        <strong>这从梯度实测上证明了每层独立放一个 151M 的 AdaLN 存在严重参数过剩</strong>，直接支撑了 S2 将 <code>dit.adaln=shared</code>（AdaLN-Single：全局共享大投影 + 每层轻量偏置，省下 ~4B 参数）作为核心结构改进方向。
+      </p>
+    </div>
+
+    <h3>红框 4 · <code>train/gn/condition_proj</code>（截图值：<code>0.0018</code>，波动区间 <code>0.0014 ~ 0.0034</code>）</h3>
+    <div class="card" style="margin-bottom:16px">
+      <h4>1. 代码定义：为什么专门监控这一个仅占 0.19% 参数的小线性层？</h4>
+      <p>
+        在 <code>chrome/tasks/t2a.py</code> 第 120 行中，<code>gn/condition_proj</code> 单独提取了 <code>ChromeDiT.condition_proj</code>（<code>nn.Linear(5120, 4096, bias=True)</code>，仅 <strong>20.98M 参数，占全模型 0.19%</strong>）在裁剪前的 L2 梯度范数。
+        它是冻结的 Qwen3-VL-32B 第 50 层输出（<code>[ΣL, 5120]</code>）进入可训练 DiT 的<strong>第一道咽喉门户</strong>（见 <a href="#refiner">§09 图 4b</a>）。专门把它拎出来画一条曲线，有两个不可替代的算法诊断目的：
+      </p>
+      <ul>
+        <li>
+          <strong>目的 ①：监测「跨模态注意力通路」是否畅通（防止条件坍缩）</strong><br>
+          在单流 ChromeDiT 中，文本行在最后一层 <code>FinalLayer</code> 被直接丢弃，<strong>不直接参与 MSE loss</strong>。
+          <code>condition_proj</code> 要拿到梯度，唯一的路径是：<code>音频行的 MSE 梯度 → 在 28 层 DiTBlock 的双向 Self-Attention 中通过音频行对文本行的注意力权重反传到文本行的 K/V → 穿过 2 层 TokenRefiner → 反传到 condition_proj</code>。
+          在从零训练（<code>t2a_10b</code>）的第 20 步，因为主干 AdaLN 的 gate 还是 0，音频行看不见文本行，<code>gn/condition_proj</code> 只有 <code>3e-6</code>（几乎为 0）；随着 step 200 门打开，它跃升至 <code>0.094</code>，并在稳态保持在 <code>0.0015 ~ 0.0030</code>。
+          <strong>如果在算法实验中发现 <code>gn/condition_proj</code> 跌向 0，说明模型发生了“条件坍缩”（忽略文本 prompt、退化为无条件音频先验）</strong>。
+        </li>
+        <li>
+          <strong>目的 ②：盯防 Qwen 第 50 层「Massive Activation（巨型激活值）」引发梯度爆炸</strong><br>
+          如 <a href="#text">§09</a> 实测，Qwen 第 50 层没有经过 <code>RMSNorm</code>，每条 caption 的第 0 个 token 在第 731 维恒定有一个约 <strong><code>15872</code></strong> 的巨型激活值（整行 RMS 约 224，是普通 token 的 50 倍）。
+          对于线性层 <code>y = x W^T + b</code>，权重的梯度为 <code>∇_W L = (∇_y L)^T x</code>——输入 <code>x</code> 的第 731 维放大了 3000 倍，导致 <code>condition_proj.weight[:, 731]</code> 这一列的梯度占了整个 <code>condition_proj</code> 梯度平方和的 <strong>~75%</strong>（直到 2 层 TokenRefiner 末尾的 <code>final_norm</code> 才把每行尺度拉平）。
+          在 10B 默认配置 <code>dit.text_norm: none</code> 下，<code>gn/condition_proj</code> 稳定在 <code>0.0014 ~ 0.0034</code> 无尖峰，证明 bf16 + <code>final_norm</code> 完全能稳住这颗巨型激活。
+        </li>
+      </ul>
+      <h4>2. 单位参数梯度密度对比（为什么 0.19% 的参数有这么可观的梯度？）</h4>
+      <p style="margin:0">
+        对比红框 3 和红框 4：<code>condition_proj</code> 的参数量（20.98M）只有 <code>AdaLN</code>（4247M）的 <strong>1/202</strong>，但它的梯度范数（<code>0.0018</code>）却达到了 <code>gn/adaln</code>（<code>0.0061</code>）的 <strong>30%</strong>！
+        如果计算<strong>每个参数的平均梯度均方根（<code>||g||_2 / sqrt(N_params)</code>）</strong>，<code>condition_proj</code> 的单位参数梯度强度是 <code>AdaLN</code> 的约 <strong>60 倍</strong>。
+        原因正在于它直接承受了 Qwen 未归一化残差流的大幅值输入，且承担着把因果 LM 表示对齐到声学空间的繁重任务。
+      </p>
+    </div>
+
+    <h3>同图相邻面板 · <code>train/batch_id</code>（<code>1280</code>）与 <code>train/fill</code>（<code>0.9731</code>）</h3>
+    <div class="grid-2" style="margin-bottom:16px">
+      <div class="card">
+        <h4>左上：<code>train/batch_id</code>（严格 45° 直线，值 = <code>1280</code>）</h4>
+        <ul style="margin-bottom:0">
+          <li><strong>代码出处</strong>：<code>chrome/data/sampler.py · MixtureBatchSampler</code> 每吐出一个封好的包，内部计数器 <code>batch_id</code> 加 1。因为 <code>train.grad_accum = 1</code>，每一步消费 1 个包，故 <code>batch_id == step == 1280</code>。</li>
+          <li><strong>为什么要画一条看似平淡的直线？</strong> 用来<strong>校验断点续训的精确性</strong>。当训练中断重启时，Trainer 从 <code>checkpoints/step_*/data_rank*.json</code> 恢复 sampler 状态，<code>batch_id</code> 必须从断点无缝接上继续走直线；若掉回 0 或跳变，说明数据流状态丢失、发生了样本重采。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>左下：<code>train/fill</code>（值 = <code>0.9731</code>，在 <code>0.971 ~ 0.975</code> 震荡）</h4>
+        <ul style="margin-bottom:0">
+          <li><strong>代码出处</strong>：<code>chrome/tasks/t2a.py · T2ATask.prepare</code> 中 <code>inputs.seq.used / self.max_tokens</code>（本卡有效 token 行数 / 24840）。</li>
+          <li><strong>为什么 <code>s20</code> 是 <code>0.973</code>，比 15s 阶段的 <code>0.976</code> 低了 0.003？</strong> 因为贪心装包遇到“再塞下一条会超过 24840”时，绝不截断音频，而是把该条放进 <code>_carry</code> 留给下一包（见 §06）。扩窗到 20 s 后，单条 20 s 样本重达 <code>80×20 + L ≈ 1650</code> 行（15 s 最长约 1250 行），大颗粒样本在接近 24840 时留下的余量略大一点。即便如此，<strong>97.3% 的填充率意味着全包只有约 2.7% 的 padding 浪费</strong>。</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>算法开发：TensorBoard 全指标诊断速查表</h3>
+    <table>
+      <thead><tr><th>TensorBoard 指标</th><th>源码位置</th><th>10B 正常稳态范围</th><th>异常现象与根因诊断</th><th>算法 / 工程处理措施</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>train/data_s</code></td>
+          <td><code>trainer.py:258</code></td>
+          <td><code>0.0008 ~ 0.0010 s</code></td>
+          <td>升至 <code>&gt;0.05 s</code> 或周期性尖峰：CPU 读盘/重采样跟不上 GPU</td>
+          <td>内嵌音频 Parquet 跑 <code>repack_audio.sh</code> 转 Arrow；检查 <code>bad_audio.txt</code>；调大 <code>num_workers</code></td>
+        </tr>
+        <tr>
+          <td><code>train/cond_s</code><br><code>train/vae_s</code><br><code>train/text_s</code></td>
+          <td><code>trainer.py:262</code><br><code>tasks/t2a.py:44</code></td>
+          <td><code>cond_s: 1.41~1.91 s</code><br><code>vae_s: 1.34~1.37 s</code><br><code>text_s: 0.07~0.56 s</code></td>
+          <td><code>text_s</code> 居高不下（<code>&gt;0.5 s</code>）：文本缓存未命中，每步都在跑 Qwen；<br><code>vae_s</code> 偏高：包内不同秒数桶过多</td>
+          <td>用空闲卡跑 <code>scripts/text/cache_text.sh</code> 预填缓存（可同时省去 48.8 GB Qwen 显存）；在 <code>prepare</code> 中做离线 latent 缓存</td>
+        </tr>
+        <tr>
+          <td><code>train/model_s</code></td>
+          <td><code>trainer.py:277</code></td>
+          <td><code>3.62 ~ 3.66 s</code>（24.8k）</td>
+          <td>突然变慢至 <code>&gt;4.5 s</code>：某张卡触发 CUDA 显存碎片回收（<code>cudaMalloc</code> 重分配）或 NCCL 慢节点</td>
+          <td>查各卡 <code>nvidia-smi</code> 显存是否逼近 141 GB 触发 thrashing；勿在 Qwen 常驻时加大 <code>max_tokens</code></td>
+        </tr>
+        <tr>
+          <td><code>train/fill</code></td>
+          <td><code>tasks/t2a.py:135</code></td>
+          <td><code>0.972 ~ 0.977</code></td>
+          <td>显著下降（如 <code>&lt;0.92</code>）：单条样本代价过大，或命中了 <code>max_samples</code> 条数上限</td>
+          <td>若极短片段占比极高，把 <code>data.loader.max_samples</code>（默认 64）调大；长片段多则属正常粒度效应</td>
+        </tr>
+        <tr>
+          <td><code>train/grad_norm</code></td>
+          <td><code>trainer.py:274</code></td>
+          <td>从零训初期 <code>0.3~0.9</code> → 稳态 <code>0.045~0.060</code></td>
+          <td>频繁超过 <code>grad_clip=1.0</code> 或出现尖刺：学习率偏大、脏音频样本（静音/爆音）或新模块未做零初始化</td>
+          <td>新增旁路/条件注入块务必对 gate 或输出投影做零初始化；检查对应 step 的 <code>batch_id</code> 样本</td>
+        </tr>
+        <tr>
+          <td><code>train/gn/adaln</code></td>
+          <td><code>tasks/t2a.py:121</code></td>
+          <td>从零训峰值 <code>0.81</code> → 稳态 <code>0.0045~0.0063</code></td>
+          <td>从零训长期为 <code>0</code>：<code>final_layer.audio_out</code> 未更新导致死锁；<br>稳态占比极低：39% 参数仅贡献 ~1.5% 梯度能量</td>
+          <td>验证 S2 的 <code>dit.adaln=shared</code>（AdaLN-Single），把省下的 ~4B 参数用于加深主干或减小模型体积</td>
+        </tr>
+        <tr>
+          <td><code>train/gn/condition_proj</code></td>
+          <td><code>tasks/t2a.py:120</code></td>
+          <td>稳态 <code>0.0014 ~ 0.0034</code></td>
+          <td>① 跌至 <code>~0</code>：音频行不再 attend 文本行（条件坍缩）；<br>② 暴涨 / NaN：Qwen 第 50 层第 0 个 token 巨型激活（15872）溢出</td>
+          <td>若暴涨或改用更高 LR，开启 <code>dit.text_norm=stats dit.text_clip=8</code> 或 <code>dit.text_norm=rmsnorm</code></td>
+        </tr>
+        <tr>
+          <td><code>train/loss</code> 与<br><code>train/loss/&lt;source&gt;</code></td>
+          <td><code>tasks/t2a.py:100</code></td>
+          <td><code>loss: 1.27 → 0.255</code><br>语音 <code>~0.24</code>，音乐/AudioSet <code>~0.30</code></td>
+          <td>注意总 <code>loss</code> 是按音频 token 等权（长音频权重高），而各源 <code>loss/*</code> 是按条等权；某源 loss 不降说明配比过低或 caption 噪声大</td>
+          <td>调整 <code>sources_*.yaml</code> 中的 <code>max_records</code>（混合权重）或 <code>keep</code> 过滤阈值（如 <code>cer</code> / <code>dnsmos</code>）</td>
+        </tr>
+      </tbody>
+    </table>
   </section>
 
   <!-- ========== 17 ========== -->
   <section class="section" id="train">
-    <h2><span class="num">17</span>S2 训练框架（已实现）</h2>
+    <h2><span class="num">17</span>S2 训练框架与算法开发指南（已实现）</h2>
     <p>
       分四层，每层只经一个接口和别的层打交道，扩展时只动一层。
       采样器（<code>chrome/flow/sampler.py</code>）、文本编码器（<code>chrome/text/</code>）、推理（<code>chrome/pipeline/t2a.py</code>）各自独立。
@@ -2849,8 +3073,52 @@ prepared = task.prepare(batch)                            # VAE 编码 → 文�
 with parallel.accumulate(model, sync=last_micro):
     out = task.loss(model, prepared.inputs, generators)   # rectified flow，v = ε − x0
     out.loss.backward()
+# 每 log_every 步在裁剪前算 grad_groups (gn/adaln, gn/condition_proj)
 parallel.clip_grad_norm → optimizer.step → ema.update
 </pre>
+
+    <h3>面向算法开发：改哪里、怎么加功能（实战速查）</h3>
+    <table>
+      <thead><tr><th>算法开发需求</th><th>需要改的文件 / 注册表</th><th>不需改的部分</th><th>验证命令与重点监控曲线</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>1. 加新数据源 / 调数据配比 / 调过滤阈值</strong></td>
+          <td>在 <code>configs/data/sources_*.yaml</code> 增改源（支持 JSONL、Parquet、<code>sidecar</code> 伴生质检表）；若是内嵌音频 Parquet 先跑 <code>scripts/data/repack_audio.sh</code></td>
+          <td><code>chrome/data/</code> 代码不用动；只改 <code>weight</code> 不用重建索引</td>
+          <td><code>bash scripts/data/build_index.sh data.only=[源名]</code>；<br>盯 <code>train/data_s</code>（需 <code>&lt;2 ms</code>）与 <code>train/loss/&lt;源名&gt;</code></td>
+        </tr>
+        <tr>
+          <td><strong>2. 扩充训练音频最大时长</strong><br><span class="dim">（如 15s → 20s）</span></td>
+          <td>新建训练 yaml（如 <code>configs/train/t2a_10b_s20.yaml</code>）：设 <code>audio.max_seconds: 20</code>、独立索引目录 <code>paths.data_index: outputs/data/index_s20</code>、<code>train.init_from</code> 指向旧 EMA ckpt</td>
+          <td>DiT、3D MM-RoPE、VAE、Packer 全自动按 <code>AudioSpec</code> 适应</td>
+          <td>盯 <code>train/fill</code>（<code>&gt;0.96</code>）、<code>train/cond_s</code>（新长样本首次编码会略抬高 <code>text_s</code>）及 20s preview 听感</td>
+        </tr>
+        <tr>
+          <td><strong>3. 探索 AdaLN 共享 / 文本归一化消融</strong></td>
+          <td>已内置开关：命令行或 yaml 传 <code>dit.adaln=shared</code>（AdaLN-Single）或 <code>dit.text_norm=stats dit.text_clip=8</code> / <code>rmsnorm</code></td>
+          <td>Trainer、Task、Layout 不用动</td>
+          <td>跑 <code>t2a_1b.yaml</code> 对比验证集 <code>val/loss</code>；盯 <code>train/gn/adaln</code> 与 <code>train/gn/condition_proj</code></td>
+        </tr>
+        <tr>
+          <td><strong>4. 换更小的文本编码器或改截断层数</strong></td>
+          <td>改 <code>configs/text/qwen3vl_32b.yaml</code> 的 <code>num_layers</code>，或在 <code>chrome/text/</code> 用 <code>@register_text_encoder</code> 注册新编码器；<code>dit.text_dim: null</code> 会自动读取新编码器宽度</td>
+          <td><code>CachedTextEncoder</code> 会根据（路径+层数+dtype）自动生成新指纹子目录，绝不串缓存</td>
+          <td>先跑 <code>cache_text.sh</code> 看 <code>[text-stats]</code> 的 Massive Activation 幅度，再盯 <code>gn/condition_proj</code></td>
+        </tr>
+        <tr>
+          <td><strong>5. 加参考音频（Ref2A）/ 音频续写 / Inpainting</strong></td>
+          <td>① <code>chrome/dit/layout.py</code>：<code>@register_layout("t2a_ref")</code> 产出 <code>clean=True, target=False</code> 的参考音频段；<br>② <code>chrome/tasks/t2a.py</code>：只对目标段加噪；<br>③ <code>chrome/pipeline/t2a.py</code>：每步把干净参考段拼入</td>
+          <td><code>ChromeDiT</code>、<code>packing.py</code>、<code>flow_loss</code>、<code>Euler</code> 采样器底层已支持逐行 <code>t_rows</code> 与 <code>audio_target</code> 掩码（见 §12）</td>
+          <td>跑 <code>scripts/dit/check_t2a_stack.sh</code> 单测确认 <code>clean</code> 行 <code>t=1.0</code> 且不进 loss</td>
+        </tr>
+        <tr>
+          <td><strong>6. 加高阶 ODE/SDE 采样器或少步蒸馏（S4）</strong></td>
+          <td>采样器在 <code>chrome/flow/sampler.py</code> 用 <code>@register_sampler</code> 注册，推理传 <code>infer.sampler=新名字</code>；蒸馏在 <code>chrome/tasks/</code> 用 <code>@register_task</code> 注册新 Task</td>
+          <td><code>Trainer</code> 与 FSDP2 并行层与任务解耦，直接复用</td>
+          <td>用 <code>infer_t2a.sh</code> 在 <code>preview_set.json</code> 上对比 50 步 vs 4–8 步的 <code>mel_l1</code> 与听感</td>
+        </tr>
+      </tbody>
+    </table>
 
     <h3>模型构建与 FSDP2</h3>
     <ul>
@@ -2864,19 +3132,21 @@ parallel.clip_grad_norm → optimizer.step → ema.update
       <li>DDP 设 <code>broadcast_buffers=False</code>，验证和 preview 走未包装的模型。</li>
     </ul>
 
-    <h3>Checkpoint 格式</h3>
-<pre>&lt;run_dir&gt;/config.yaml  log.jsonl  samples/step_*/
-&lt;run_dir&gt;/checkpoints/latest                      最新一个完整的 step 目录名
-&lt;run_dir&gt;/checkpoints/step_0001000/
-    state/            torch.distributed.checkpoint（DCP）：model、ema（完整 state，含 buffer）、optimizer
-    trainer.pt        scheduler、step、dit 配置、并行方式、world size（rank 0 最后写，有它才算完整）
-    data_rank*.pt     每个 rank 的 sampler 状态
-    ema.safetensors   可选：train.export=ema 或 export_t2a.sh 导出的单文件 fp32 权重
+    <h3>Checkpoint 格式与 TensorBoard 立体声同步</h3>
+<pre>&lt;family&gt;/                                          outputs/train/&lt;run_name&gt;（stamp_run=true 时下挂时间戳子目录）
+&lt;run_dir&gt;/config.yaml  log.jsonl  tb/  samples/step_*/
+&lt;run_dir&gt;/checkpoints/latest                       最新一个完整的 step 目录名
+&lt;run_dir&gt;/checkpoints/step_0002000/
+    model.safetensors / ema.safetensors            10B 默认（save_sharded=false）：rank 0 聚合写出单文件 fp32 权重
+    optimizer.pt                                   10B 默认：完整 AdamW 状态（86.6 GB，续训必需）
+    state/                                         可选：save_sharded=true（smoke / 1B）时的 8 片 DCP 分片目录
+    trainer.pt                                     step、LR scheduler、dit 配置、并行方式（最后写，有它才算完整）
+    data_rank{0..7}.json                           每个 rank 的 MixtureBatchSampler 状态（保证续训 batch_id 连续）
 </pre>
-    <p>
-      DCP 加载时自动重新分片：换卡数、DDP 和 FSDP 互换都能续训。单进程推理直接读 <code>state/</code>，不必先导出。
-      <code>train.init_from</code> 只拿权重开新 run（run 目录、step 目录或 .safetensors 文件）。
-    </p>
+    <ul>
+      <li><strong>整文件快照（<code>save_sharded=false</code>，10B 默认）与分片快照（<code>save_sharded=true</code>）自适应</strong>：<code>checkpoint.py · load_state / load_weights</code> 自动检测目录里是 <code>model.safetensors</code> 还是 <code>state/</code>，续训和单卡推理直接读取，无需手动转换。<code>train.init_from</code> 只加载权重（优先读 <code>ema.safetensors</code>）开启新阶段训练（如 <code>t2a_10b_s20</code> 从 <code>t2a_10b</code> 的 <code>step_0100000</code> 热启动），重置优化器与数据流。</li>
+      <li><strong>TensorBoard 增量同步与真立体声内嵌（<code>chrome/train/tensorboard.py</code>）</strong>：训练过程中直接写 <code>&lt;run_dir&gt;/tb/</code>，也可随时跑 <code>bash scripts/train/tensorboard.sh outputs/train</code> 把历史 <code>log.jsonl</code> 和 <code>samples/step_*/*.wav</code> 追平（进度记在 <code>tb/cursor.json</code>，幂等不重复）。由于 PyTorch 原生 <code>SummaryWriter.add_audio</code> 只支持单声道，<code>tensorboard.py · audio_summary</code> 专门直接构造 2 声道 16-bit PCM WAV 字节流写入 TensorBoard Protobuf，确保在浏览器 Audio 面板里听到的是<strong>原汁原味的立体声</strong>。</li>
+    </ul>
 
     <h3>日志</h3>
     <p>
@@ -3086,6 +3356,122 @@ bash scripts/train/export_t2a.sh outputs/train/t2a_10b --checkpoint 2000 --weigh
       <code>mel_l1</code> 是三档 Mel（512/64、1024/128、2048/128）的 |log10| 均值。
       立体声另报 L/R 相关、side/mid、ILD。
     </p>
+
+    <h3 id="asr">19b · Preview 语音可懂度：ASR 错误率（<code>chrome/eval/asr_preview.py</code>）</h3>
+    <p>
+      preview 里有十几种语言和方言，靠耳朵听判断不了"说的是不是 caption 里那句话"。这一步用 Qwen3-ASR-1.7B 把每条
+      <code>[SPEECH]</code> preview 转成文字，再和 caption 里的对白比对，得到一个可以跨 step 画曲线的数值。
+      评测在 <code>qwen3-asr</code> 环境里离线运行，不进训练进程：训练卡显存已占 100–140 GB，而且两个环境的 torch / transformers 版本不同。
+    </p>
+    <div class="callout">
+      <div class="title">链路</div>
+      <p style="margin:0">
+        <code>samples/step_X/*.txt</code> 里的 caption，只取 <code>[SPEECH]: &lt;d&gt;[Lang][方言][性别]… 正文&lt;/d&gt;</code> 这一类，
+        正文作为<strong>参考文本</strong>，第一个标签作为<strong>预期语言</strong>
+        → 同名 wav 送 Qwen3-ASR，<strong>不指定语言</strong>，得到识别出的语言和<strong>识别文本</strong>
+        → 两边做同一套归一化 → 按语言选字或词做 Levenshtein 对齐，数出替换 S、删除 D、插入 I。
+        纯音效、纯音乐和 <code>[MUSIC]</code> 歌词条目不参与打分。
+      </p>
+    </div>
+
+    <h4>错误率怎么算</h4>
+    <p>
+      单条错误率 <code>err = (S + D + I) / N</code>，<code>N</code> 是参考文本的长度（字数或词数）。0 表示完全一致。
+      插入多的时候（比如 ASR 输出了一大段重复）单条可以超过 1。
+    </p>
+    <table>
+      <thead><tr><th>语言</th><th>单位</th><th>原因</th></tr></thead>
+      <tbody>
+        <tr><td>Chinese、Cantonese、Japanese、Korean、Thai</td><td>字（CER）</td><td>没有可靠的词边界；韩语参考文本本身就不带空格</td></tr>
+        <tr><td>English、German、French、Spanish、Russian、Arabic 等</td><td>词（WER）</td><td>空格分词，跟业界 TTS 评测口径一致。每条另外也算一份 CER</td></tr>
+      </tbody>
+    </table>
+    <p>归一化对参考文本和识别文本完全对称，只消除"写法不同、读音相同"的差异：</p>
+    <ul>
+      <li>NFKC（全角转半角）+ 统一小写，去掉标点和撇号，空白合并。</li>
+      <li>繁体转简体（<code>zhconv</code>）：台湾、粤语的参考文本是繁体，ASR 可能输出简体。</li>
+      <li>阿拉伯语：去掉元音符号，统一 أ/إ/آ→ا、ة→ه、ى→ي、ؤ→و、ئ→ي。参考文本本身就是这种折叠写法。</li>
+      <li><strong>粤语折叠</strong>（只对标签为 <code>[Cantonese]</code> 的条目）：caption 是书面语，Qwen3-ASR 写的是粤语口语字。
+        两边都把约 40 个口语字词转成书面字（喺→在、嘅→的、系→是、佢哋→他们、啲→些、冇→没有、唔→不、嗰个→那个、点解→为什么、而家→现在…），
+        再去掉句末语气词（啊、呀、啦、喇、啰、咯、喎、㗎、啩、嘛、哦…）。不做折叠的分数另存为 <code>err_strict</code>。</li>
+    </ul>
+
+    <h4><code>asr_summary.json</code>（每个 step 一份）</h4>
+    <table>
+      <thead><tr><th>字段</th><th>含义</th><th>怎么读</th></tr></thead>
+      <tbody>
+        <tr><td><code>step</code></td><td>这批 preview 对应的训练步</td><td></td></tr>
+        <tr><td><code>clips</code></td><td>参与打分的 <code>[SPEECH]</code> 条数</td><td>preview 集不变时应该恒定，变少说明有 wav 缺失</td></tr>
+        <tr><td><code>err</code></td><td><strong>主指标</strong>。每条按自身语言的单位算错误率，单条超过 1 的按 1 计，再对所有条目取平均（宏平均）</td><td>每条权重相同，一条很差的短句也会拉高它；TensorBoard 上主要看这条曲线</td></tr>
+        <tr><td><code>cer</code></td><td>全部条目统一按字符算的微平均：所有条目字符编辑数之和 ÷ 参考字符总数（去空格）</td><td>跨语言统一口径，长句权重大</td></tr>
+        <tr><td><code>wer</code></td><td>只统计按词计的语言：词编辑数之和 ÷ 参考词总数</td><td>没有这类条目时为 <code>null</code></td></tr>
+        <tr><td><code>lid_acc</code></td><td>Qwen3-ASR 自动识别出的语言等于 caption 第一个标签的比例</td><td>回答"有没有说对语言"。小于 1 时去 <code>asr.jsonl</code> 找 <code>lid_ok=false</code> 的条目</td></tr>
+        <tr><td><code>by_language.&lt;语言&gt;.clips</code></td><td>该语言的条数</td><td>台湾、四川话等方言都归到 Chinese</td></tr>
+        <tr><td><code>by_language.&lt;语言&gt;.err</code></td><td>该语言内的宏平均 <code>err</code></td><td>条数只有 1 的语言（Arabic、Japanese、Russian…）波动会很大</td></tr>
+        <tr><td><code>by_language.&lt;语言&gt;.err_strict</code></td><td>同上，但不做粤语折叠</td><td>只有 Cantonese 和 <code>err</code> 不同，用来对照折叠去掉了多少用字差异</td></tr>
+        <tr><td><code>by_language.&lt;语言&gt;.lid_acc</code></td><td>该语言的语言识别准确率</td><td></td></tr>
+      </tbody>
+    </table>
+    <p>
+      举例：step 10000 的 <code>Arabic: {clips: 1, err: 0.3846, err_strict: 0.3846, lid_acc: 1.0}</code>，意思是只有 1 条阿拉伯语；
+      参考文本 26 个词，ASR 认出 10 个替换，0 删除、0 插入，10/26 = 0.3846；语言识别对了；它不是粤语，所以两种口径相同。
+    </p>
+
+    <h4><code>asr.jsonl</code>（每条一行）</h4>
+    <table>
+      <thead><tr><th>字段</th><th>含义</th></tr></thead>
+      <tbody>
+        <tr><td><code>name</code> / <code>tags</code></td><td>preview 名和 caption 里的全部标签</td></tr>
+        <tr><td><code>language</code> / <code>asr_language</code> / <code>lid_ok</code></td><td>预期语言、ASR 识别出的语言、两者是否一致</td></tr>
+        <tr><td><code>unit</code></td><td><code>char</code> 或 <code>word</code>，决定 <code>err</code> 的单位</td></tr>
+        <tr><td><code>ref</code> / <code>hyp</code></td><td>原始参考文本和识别文本，<strong>听不懂的语种直接对照这两列</strong></td></tr>
+        <tr><td><code>ref_norm</code> / <code>hyp_norm</code></td><td>实际参与打分的归一化文本（粤语是折叠之后的）</td></tr>
+        <tr><td><code>ref_len</code> / <code>sub</code> / <code>del</code> / <code>ins</code></td><td>N 和 S / D / I。<code>del</code> 多通常是漏读或生成时长不够被截断，<code>ins</code> 多通常是重复或多读</td></tr>
+        <tr><td><code>err</code> / <code>err_strict</code> / <code>cer</code> / <code>wer</code></td><td>主错误率、不折叠的错误率、字符错误率、词错误率（仅词单位语言）</td></tr>
+        <tr><td><code>char_len</code> / <code>char_edits</code></td><td>字符级的 N 和 S+D+I，用于汇总微平均 <code>cer</code></td></tr>
+      </tbody>
+    </table>
+
+    <h4>step 10000 实测（t2a_10b_s20_ws）</h4>
+    <table>
+      <thead><tr><th>语言</th><th>条数</th><th>err</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>Chinese（普通话 / 台湾 / 四川 / 耳语 / 唱歌）</td><td>11</td><td>0.007</td><td>基本全对</td></tr>
+        <tr><td>English</td><td>4</td><td>0.011</td><td>基本全对</td></tr>
+        <tr><td>French / Korean / German / Spanish</td><td>各 1</td><td>0.03–0.11</td><td>个别词错，多为人名和拼写</td></tr>
+        <tr><td>Cantonese</td><td>3</td><td>0.323（strict 0.383）</td><td>部分是真错，其中一条参考文本本身是普通话写法</td></tr>
+        <tr><td>Arabic / Japanese / Russian</td><td>各 1</td><td>0.38–0.47</td><td>确实读错，例如日语"大綱"读成了"第五投げ"</td></tr>
+      </tbody>
+    </table>
+    <p>汇总：<code>err=0.106</code>，<code>cer=0.069</code>，<code>wer=0.090</code>，<code>lid_acc=1.0</code>。</p>
+
+    <div class="callout warn">
+      <div class="title">读数时的已知局限</div>
+      <ul style="margin:0">
+        <li><strong>ASR 本身也会错</strong>：方言、耳语、唱歌、口音较重的条目，即使是真实录音也不会是 0。当前没有用 <code>samples/gt</code> 跑 ASR 基线，所以单条的绝对值要打折看，<strong>重点看同一条随 step 的趋势</strong>（<code>asr_trend.tsv</code>）。</li>
+        <li><strong>时长截断</strong>：生成时长是整秒（4–15 s 或 4–20 s），参考文本对应的原始录音可能更长，结尾几个字被截掉会变成固定的删除错误。</li>
+        <li><strong>粒度</strong>：单条只有十几个词的语言（例如 Russian 只有 15 个词），一个词错就是 0.07。</li>
+        <li><strong>同义改写</strong>：粤语"均"对"都是"这类同义词仍算错误，没有做同义词表。</li>
+      </ul>
+    </div>
+
+    <h4>产出与 TensorBoard</h4>
+    <table>
+      <thead><tr><th>文件</th><th>内容</th></tr></thead>
+      <tbody>
+        <tr><td><code>samples/step_X/asr.jsonl</code></td><td>逐条结果（见上表）</td></tr>
+        <tr><td><code>samples/step_X/asr_summary.json</code></td><td>这一步的汇总（见上表）</td></tr>
+        <tr><td><code>&lt;run_dir&gt;/asr_trend.tsv</code></td><td>行是条目、列是 step，值是 <code>err</code>；最后一行是每步的平均 <code>err</code></td></tr>
+        <tr><td><code>&lt;run_dir&gt;/asr_trend.png</code></td><td>tsv 的折线图，每次运行都会重画。上半张：每种语言一条线（该语言条目的 <code>err</code> 平均，单条超过 1 按 1 计；图例里括号是条数）；下半张：每条 preview 一条线（原始 <code>err</code>，不截断），图例标注按 CER 还是 WER 算。两张都有黑色虚线表示整体平均 <code>err</code>。step 不超过 30 个时画数据点</td></tr>
+        <tr><td><code>&lt;run_dir&gt;/asr_log.jsonl</code></td><td>每步一行，<code>event=asr</code>，供 TensorBoard 导入</td></tr>
+      </tbody>
+    </table>
+    <p>
+      TensorBoard 标签：<code>asr/err</code>、<code>asr/cer</code>、<code>asr/wer</code>、<code>asr/lid_acc</code>、<code>asr/clips</code>、
+      <code>asr/err_lang/&lt;语言&gt;</code>、<code>asr/clip/&lt;preview 名&gt;</code>。
+      <code>chrome/train/tensorboard.py</code> 在 sync 时导入 <code>asr_log.jsonl</code>；训练进程每写一次训练标量，也会检查这个文件有没有变大，有新内容就导入，所以和 <code>--watch</code> 一起用时曲线是实时的。
+      已经导入过的 step 不会重复导入；用 <code>--rescore</code> 改口径后，已导入 step 的曲线不会自动刷新。
+    </p>
   </section>
 
   <!-- ========== 20 ========== -->
@@ -3119,9 +3505,13 @@ CUDA_VISIBLE_DEVICES=0 python tests/test_h3_parity.py --config configs/vae/h3_fr
 # S1：数据管线自检（合成音频，CPU，约 25 秒）
 bash scripts/data/check_data_pipeline.sh
 
-# 建索引：没变的源自动跳过；只重建某个源
+# Parquet 内嵌音频转存为零拷贝 Arrow Blob（WorldSpeech 等数据集）
+bash scripts/data/repack_audio.sh configs/data/t2a_worldspeech.yaml data.only=[ws_yue_hk]
+
+# 建索引：没变的源自动跳过；只重建某个源；或为 20s 扩窗建独立索引
 bash scripts/data/build_index.sh
 bash scripts/data/build_index.sh data.only=[zhizhou] data.build.force=true
+bash scripts/data/build_index.sh configs/train/t2a_10b_s20.yaml
 
 # 行数、时长、丢弃原因、长度分布、混合后的占比和 epoch 数
 bash scripts/data/inspect_data.sh inspect.world_size=64 inspect.steps=300000
@@ -3144,17 +3534,33 @@ bash scripts/train/train_t2a.sh configs/train/t2a_1b.yaml                       
 bash scripts/train/train_t2a.sh configs/train/t2a_1b.yaml dit.adaln=shared train.run_name=t2a_1b_shared
 bash scripts/train/train_t2a.sh configs/train/t2a_1b.yaml dit.text_norm=stats dit.text_clip=8 train.run_name=t2a_1b_stats
 bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml data.loader.subset=100 train.max_steps=20 train.run_name=t2a_10b_dry
-bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml                                     # 10B，单机 8 卡 FSDP
+bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml                                     # S3a：10B 4–15s，单机 8 卡 FSDP
+bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20.yaml                                 # S3b：10B 4–20s 扩窗续训（从 100k EMA 热启动）
 # 多机（每台各跑一次，NODE_RANK 不同）：机内分片、机间复制（HSDP）
 NNODES=4 NODE_RANK=0 MASTER_ADDR=10.0.0.1 bash scripts/train/train_t2a.sh configs/train/t2a_10b.yaml train.parallel.shard_size=8
 
-# 推理（直接读分片 checkpoint，默认 latest 的 EMA）
-CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_smoke 'infer.prompts=["Heavy rain on a tin roof."]'
-CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_smoke infer.prompt_file=configs/eval/preview_set.json infer.steps=30
+# TensorBoard 面板（增量同步 log.jsonl 与立体声 preview wav，默认端口 6006）
+bash scripts/train/tensorboard.sh outputs/train
+bash scripts/train/tensorboard.sh outputs/train/t2a_10b_s20 --sync-only
+
+# Preview 语音 ASR 指标（qwen3-asr 环境，Qwen3-ASR-1.7B，单卡约 5–8 GB；已评过的 step 自动跳过，见 §19b）
+CUDA_VISIBLE_DEVICES=5 bash scripts/eval/asr_preview.sh outputs/train/t2a_10b_s20_ws/20261021_210505
+CUDA_VISIBLE_DEVICES=5 bash scripts/eval/asr_preview.sh outputs/train/t2a_10b_s20_ws --steps 10000 11000
+CUDA_VISIBLE_DEVICES=5 nohup bash scripts/eval/asr_preview.sh outputs/train/t2a_10b_s20_ws --watch \
+  &gt; outputs/train/t2a_10b_s20_ws/asr_watch.log 2&gt;&amp;1 &amp;                                     # 跟训练并行，新 step 出现就评
+bash scripts/eval/asr_preview.sh outputs/train/t2a_10b_s20_ws --rescore            # 只按新口径重算已有 asr.jsonl，不跑 ASR、不占 GPU
+# 每次运行都会重画 &lt;run_dir&gt;/asr_trend.png；所有 step 都评过时，同一条命令只重画 tsv / png，不加载模型
+
+# 清理中断残留的孤儿训练进程
+bash scripts/train/kill_t2a.sh
+
+# 推理（直接读整文件或分片 checkpoint，默认 latest 的 EMA）
+CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b 'infer.prompts=["Heavy rain on a tin roof."]'
+CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b_s20 infer.prompt_file=configs/eval/preview_set_s20.json infer.steps=50
 
 # 导出单文件 fp32 权重（CPU）
 bash scripts/train/export_t2a.sh outputs/train/t2a_10b
-bash scripts/train/export_t2a.sh outputs/train/t2a_10b --checkpoint 2000 --weights model
+bash scripts/train/export_t2a.sh outputs/train/t2a_10b --checkpoint 100000 --weights ema
 </pre>
 
     <h3>代码里怎么用 VAE</h3>
@@ -3189,22 +3595,24 @@ save_audio("rec.wav", wave_rec, 32000)
     <h2><span class="num">21</span>目录、配置、已知坑</h2>
 <pre>Chrome-10B/
 ├── skills.md
-├── docs/chrome_pipeline.html          ← 本页
+├── docs/chrome_pipeline.html          ← 本页（含 §16b 训练曲线解读与 §17 算法开发速查）
 ├── docs/minimax_h3_analysis.html      H3 分析笔记
+├── docs/assets/tb_curves_s20.png      TensorBoard 实测曲线截图（t2a_10b_s20）
 ├── chrome/
 │   ├── spec.py                        AudioSpec：秒 ↔ 点 ↔ 帧 ↔ 行
 │   ├── config.py                      _base_ 继承 + 插值 + 命令行覆盖
 │   ├── codec/                         AudioVAE、白化、bundle/diffusers I/O
 │   ├── data/
-│   │   ├── audio_io.py                read / 窗口读 / resample（核缓存）/ to_stereo / limit_peak / save
-│   │   ├── manifest.py                JSONL / Parquet：列名候选、keep 过滤、分块
+│   │   ├── audio_io.py                read / 窗口读 / arrow:// 零拷贝读 / resample / to_stereo / limit_peak
+│   │   ├── blobs.py                   Parquet 内嵌音频流式转存 Arrow Blob + 轻量 manifest.parquet
+│   │   ├── manifest.py                JSONL / Parquet：列名候选、sidecar 伴生表连接、keep 过滤、分块
 │   │   ├── captions.py                H3 tokenizer、NULL_CAPTION
 │   │   ├── index.py                   LengthPolicy、SourceSpec、并行建索引、SourceIndex
 │   │   ├── sampler.py                 MixtureBatchSampler、验证集固定 batch
 │   │   ├── dataset.py                 T2ADataset、BadAudioList
 │   │   ├── batch.py                   collate_t2a、encode_waves
-│   │   ├── loader.py                  build_train_loader、build_val_loader
-│   │   └── cli.py                     build / inspect / bench
+│   │   ├── loader.py                  build_train_loader、build_val_loader（支持 data.include）
+│   │   └── cli.py                     build / inspect / bench / repack
 │   ├── text/                          TextEncoder 注册表、Qwen3-VL 截断、random、CachedTextEncoder
 │   ├── dit/
 │   │   ├── config.py                  DiTConfig（text_norm / text_clip）
@@ -3214,31 +3622,32 @@ save_audio("rec.wav", wave_rec, 32000)
 │   │   ├── attention.py / layers.py   varlen 注意力（flash / sdpa）；block、refiner
 │   │   └── model.py                   ChromeDiT（init_weights、shard_units、set_text_stats）
 │   ├── flow/                          schedule（shift、σ 采样）、objective、sampler 注册表（euler）
-│   ├── tasks/{base,t2a}.py            Task 接口 + 注册表；T2ATask、encode_t2a、t2a_flow_loss
+│   ├── tasks/{base,t2a}.py            Task 接口 + 注册表；T2ATask、encode_t2a、t2a_flow_loss、grad_groups
 │   ├── pipeline/t2a.py                T2APipeline：from_run、generate（CFG、每条独立种子）
 │   ├── train/
 │   │   ├── dist.py                    torchrun 环境、单进程退化
-│   │   ├── parallel.py                DDP / FSDP2 / HSDP、分片 EMA
-│   │   ├── checkpoint.py              run 目录、DCP 存取、load_weights、export_weights
+│   │   ├── parallel.py                DDP / FSDP2 / HSDP、分片 EMA、grad_sq_norm
+│   │   ├── checkpoint.py              run 目录、save_full / DCP state、load_weights、export_weights
+│   │   ├── tensorboard.py             立体声 WAV Protobuf 写入 + cursor.json 幂等追平 log.jsonl
 │   │   ├── trainer.py                 与任务无关的 Trainer
 │   │   └── cli.py                     train / infer / text-cache / export
 │   └── eval/recon.py                  si_sdr、mel_l1、stereo_report
 ├── configs/_base_/{audio_spec,paths}.yaml
 ├── configs/vae/{model_h3,h3_frozen}.yaml
-├── configs/data/{t2a_base,sources_vrfoley}.yaml
+├── configs/data/{t2a_base,t2a_worldspeech,sources_vrfoley,sources_worldspeech}.yaml
 ├── configs/dit/{tiny,1b,10b}.yaml
 ├── configs/text/{qwen3vl_32b,random}.yaml
-├── configs/train/{t2a_base,t2a_smoke,t2a_1b,t2a_10b}.yaml
-├── configs/eval/preview_set.json
+├── configs/train/{t2a_base,t2a_smoke,t2a_1b,t2a_10b,t2a_10b_s20}.yaml
+├── configs/eval/{preview_set,preview_set_s20}.json
 ├── scripts/env.sh                     PYTHON、PYTHONPATH
 ├── scripts/vae/check_h3_parity.sh
-├── scripts/data/{build_index,inspect_data,bench_loader,check_data_pipeline}.sh
+├── scripts/data/{build_index,repack_audio,inspect_data,bench_loader,check_data_pipeline}.sh
 ├── scripts/text/cache_text.sh
 ├── scripts/dit/check_t2a_stack.sh
-├── scripts/train/{train_t2a,export_t2a,check_t2a_smoke}.sh
+├── scripts/train/{train_t2a,export_t2a,tensorboard,kill_t2a,check_t2a_smoke}.sh
 ├── scripts/infer/infer_t2a.sh
 ├── tests/{test_h3_parity,test_data_pipeline,test_t2a_stack,test_t2a_e2e}.py
-└── outputs/                           vae/parity/、data/index/、text_cache/、train/、check/
+└── outputs/                           vae/parity/、data/index{,_s20}/、text_cache/、train/、check/
 </pre>
 
     <h3>配置约定</h3>
@@ -3259,6 +3668,7 @@ save_audio("rec.wav", wave_rec, 32000)
       <li>VAE 批量编码只拼等长片段；补零后一起编码，被补片段最后约 10 帧 latent 会变。</li>
       <li>H3 tokenizer 要经 <code>AutoTokenizer.from_pretrained(目录)</code> 加载，直接读 <code>tokenizer.json</code> 会把 <code>&lt;d&gt;</code> 拆开。</li>
       <li>建索引主要花在 caption 分词；<code>encode_batch_fast</code>（不算 offset）快约 2.7 倍，id 相同。</li>
+      <li>内嵌音频字节的 Parquet（如 WorldSpeech）不要直接在训练时随机读，必须先用 <code>repack_audio.sh</code> 转成未压缩 Arrow Blob，否则每次随机读解压整块 row group 会拖垮 DataLoader。</li>
       <li>FSDP 下所有 rank 的前向次数必须相同，否则卡在 all-gather 直到超时；新加的验证 / preview 逻辑都要补齐。</li>
       <li>FSDP 的 <code>MixedPrecisionPolicy</code> 默认把前向输入转成 bf16，会损失 RoPE 位置和时间步的精度；要设 <code>cast_forward_inputs=False</code>。</li>
       <li>root 不 reshard 的话，no-grad 前向后会留着已经 gather 的旧权重，EMA 换权重会失效。</li>
@@ -3268,10 +3678,10 @@ save_audio("rec.wav", wave_rec, 32000)
   </section>
 
   <footer>
-    Chrome-10B 工程说明 · 依据当前仓库 <code>chrome/</code>、<code>configs/train/t2a_10b.yaml</code>、
-    <code>outputs/train/t2a_10b/log.jsonl</code> 与 <a href="./minimax_h3_analysis.html">minimax_h3_analysis.html</a>。
-    S3 10B 预训练进行中；S4–S5 标注为规划的部分以 H3 约定为准。
-    参数量为按 config 精确计算；训练显存 / 步时为实测；推理显存 / 耗时标「估算」处未实测（训练占满全部 GPU）。
+    Chrome-10B 工程说明 · 依据当前仓库 <code>chrome/</code>、<code>configs/train/t2a_10b*.yaml</code>、
+    <code>outputs/train/t2a_10b*/log.jsonl</code> 与 <a href="./minimax_h3_analysis.html">minimax_h3_analysis.html</a>。
+    S3a 15s 预训练（100k 步）已完成，S3b 20s 扩窗续训进行中；S4–S5 标注为规划的部分以 H3 约定为准。
+    参数量为按 config 精确计算；训练显存 / 步时 / 监控曲线为实测；推理显存 / 耗时标「估算」处未实测（训练占满全部 GPU）。
   </footer>
 
 </div>

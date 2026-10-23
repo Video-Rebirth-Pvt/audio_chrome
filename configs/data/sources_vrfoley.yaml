@@ -11,17 +11,18 @@
 #   name, task, paths (files or directories of .jsonl / .parquet)
 #   columns: {audio, caption, duration, sample_rate}
 #   keep: {field: value}, {field: [any, of, these]} or {field: {min, max, allow_missing}}
-#   include, sidecar, blobs: parquet with embedded audio, see sources_worldspeech.yaml
+#   include, sidecar, blobs: parquet manifests with their audio in Arrow files, see sources_worldspeech.yaml
 #   fit: pad | crop      pad rounds up; crop rounds down to a random window
 #   long: drop | crop    clips past max_seconds + slack
 #   caption_prefix, max_records, holdout_ppm
+#   min_seconds (optional): this source's shortest clip; omit it to follow audio.min_seconds
 #   weight (optional): only if you must over/under-sample a source after the cap.
 #     omit it and the loader samples in proportion to the rows you kept.
 data:
   sources:
     - name: music
       task: music
-      max_records: 1200000
+      max_records: 2000000
       # A cut-off song plus silence sounds wrong; drop the tail instead.
       fit: crop
       columns: {caption: resp_new}

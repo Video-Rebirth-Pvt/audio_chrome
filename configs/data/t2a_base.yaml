@@ -38,7 +38,7 @@ data:
     # JSONL is split into byte ranges of this size, one per worker task.
     chunk_mb: 64
     force: false
-  # Sources with `blobs`: embedded parquet audio → Arrow. Each worker holds one decoded row group (~250 MB).
+  # Sources whose parquet embeds audio and sets `blobs`: audio → Arrow. Each worker holds one decoded shard.
   repack:
     workers: 32
     force: false

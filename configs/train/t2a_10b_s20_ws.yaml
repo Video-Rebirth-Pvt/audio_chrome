@@ -1,0 +1,47 @@
+# 10B T2A at 20 s with WorldSpeech speech in 9 languages (configs/data/sources_t2a_ws.yaml), started from
+# the EMA weights of t2a_10b_s20. Fresh AdamW, fresh data stream.
+#
+# data.exclude stays preview_set_s20.json, so music / freesound / audioset in index_s20 are reused as they
+# are (a different exclude list would rebuild every source in place). The WorldSpeech
+# preview clips are holdout rows, which never train anyway, so they live only in preview.set.
+#
+# Val: 256 holdout clips per source as in s20 (1237 VR-Foley clips, the same set), and the 30 WorldSpeech
+# locales as one group (group: ws) of 256 clips split evenly over its 9 languages: ~1.5k clips in all.
+# Loss logs per language as loss/ws/speech_<lang> and in sum as loss/ws.
+#
+# Speech goes down to 3 s (audio.min_seconds, which also lets infer / preview ask for 3 s); music,
+# freesound and audioset pin min_seconds: 4 on their source, so their s20 indexes are reused. hifitts2 and
+# zhizhou are rebuilt in index_s20 in place (t2a_10b_s20.yaml then sees them as stale).
+# Per-language WorldSpeech budget (max_records on en / fr / es locales): see sources_t2a_ws.yaml.
+#
+# Output: outputs/train/t2a_10b_s20_ws/<YYYYMMDD_HHMMSS>/{config.yaml, log.jsonl, tb/, checkpoints/, samples/}
+#
+# bash scripts/data/build_index.sh --config configs/train/t2a_10b_s20_ws.yaml          # once, before training
+# bash scripts/data/inspect_data.sh --config configs/train/t2a_10b_s20_ws.yaml
+# bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20_ws.yaml data.loader.subset=100 train.max_steps=20 train.run_name=t2a_10b_s20_ws_dry
+# bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20_ws.yaml
+# Re-running the same command resumes the newest stamp of outputs/train/t2a_10b_s20_ws.
+# CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b_s20_ws infer.seconds=15 'infer.prompts=["[SPEECH]: <d>[Japanese][Japanese] 本日はお忙しいところお集まりいただき、誠にありがとうございます。</d>"]'
+# bash scripts/train/dump_preview_gt.sh outputs/train/t2a_10b_s20_ws
+# bash scripts/train/tensorboard.sh outputs/train/t2a_10b_s20_ws
+_base_: [t2a_10b_s20.yaml, ../data/sources_t2a_ws.yaml]
+
+audio:
+  min_seconds: 3
+
+train:
+  run_name: t2a_10b_s20_ws
+  # Weights only; a later relaunch with resume=auto continues this run's own checkpoints instead.
+  # s20 stopped at step 18200; its hifitts2 / zhizhou indexes have since been rebuilt for 3 s, so it does
+  # not resume. step_0018000 is its last checkpoint.
+  init_from: ${paths.output_root}/train/t2a_10b_s20/20261020_114353/checkpoints/step_0018000
+  init_weights: ema
+  # lr_schedule is constant (t2a_base), so max_steps only sets where the run stops.
+  max_steps: 100000
+  warmup_steps: 1000
+  # val_every / preview_every are 1000 already (t2a_10b); keep_ckpts stays 1.
+  ckpt_every: 1000
+
+preview:
+  # preview_set_s20.json plus WorldSpeech holdout clips: one per language, two for zh_tw and yue_hk.
+  set: configs/eval/preview_set_s20_ws.json

@@ -26,8 +26,9 @@ class DistEnv:
 
 
 def init_distributed(timeout_minutes: float = 30.0) -> DistEnv:
-    """Single node or multi-node alike: torchrun sets RANK / WORLD_SIZE / LOCAL_RANK. The long timeout covers
-    collectives that wait on one rank's slow work (a Qwen load on a cache miss, a 10B checkpoint write)."""
+    """Single node or multi-node alike: torchrun sets RANK / WORLD_SIZE / LOCAL_RANK. The timeout covers
+    collectives that wait on one rank's slow work (a Qwen load on a cache miss). Rank-0 checkpoint
+    writes wait on a file poll, not this NCCL timeout — see ``train.ckpt_timeout_minutes``."""
     from datetime import timedelta
 
     world = int(os.environ.get("WORLD_SIZE", "1"))

@@ -395,6 +395,12 @@ def check_fit_and_checkpoint(tmp: Path) -> None:
     saved_ema = {n: s.clone() for n, s in zip(ema.names, ema.shadow)}
     check("latest pointer and pruning", latest.name == "step_0000030" and kept == ["step_0000020", "step_0000030"]
           and ckpt.load_data_state(latest, 0) == {"batch_id": 30} and ckpt.stored_keys(latest) == {"model", "ema", "optimizer"})
+    half = ckpt.step_dir(run, 40)
+    half.mkdir(parents=True)
+    (half / "data_rank1.json").write_text("{}")
+    dropped = ckpt.drop_incomplete(run)
+    check("drop_incomplete removes step dirs without trainer.pt",
+          dropped == [half] and not half.exists() and ckpt.resolve_checkpoint(run).name == "step_0000030")
 
     with torch.device("meta"):
         clone = ChromeDiT(tiny_config(text_dim=16))

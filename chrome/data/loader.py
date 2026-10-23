@@ -162,6 +162,50 @@ def allocate_quota(sizes: list[int], budget: int) -> list[int]:
     return [take[i] + add[i] for i in range(len(sizes))]
 
 
+def even_split(sizes: list[int], budget: int) -> list[int]:
+    """Equal shares of ``budget``; what a small group cannot use goes to the others (in order)."""
+    take = [0] * len(sizes)
+    left = max(0, int(budget))
+    open_ = [i for i, n in enumerate(sizes) if n > 0]
+    while left > 0 and open_:
+        share = max(1, left // len(open_))
+        for i in list(open_):
+            add = min(share, sizes[i] - take[i], left)
+            take[i] += add
+            left -= add
+            if take[i] == sizes[i]:
+                open_.remove(i)
+            if left == 0:
+                break
+    return take
+
+
+def holdout_rows(specs: list[SourceSpec], indexes: list[SourceIndex], per_source: int) -> list[np.ndarray]:
+    """Up to ``per_source`` holdout rows per val group, smallest path hash first.
+
+    A source without ``group`` is its own group. In a shared group the budget is split evenly over its
+    tasks; inside a task, the rows of all its sources are merged in hash order.
+    """
+    chosen = [np.empty(0, dtype=np.int32) for _ in specs]
+    keys = [index.keys() for index in indexes]
+    groups: dict[str, list[int]] = {}
+    for i, spec in enumerate(specs):
+        groups.setdefault(spec.val_group, []).append(i)
+    for members in groups.values():
+        tasks: dict[str, list[int]] = {}
+        for i in members:
+            tasks.setdefault(specs[i].task, []).append(i)
+        pools = []
+        for sources in tasks.values():
+            pool = [(int(keys[i][r]), i, int(r)) for i in sources for r in np.flatnonzero(indexes[i].holdout)]
+            pools.append(sorted(pool))
+        for pool, n in zip(pools, even_split([len(p) for p in pools], per_source)):
+            for i in {i for _, i, _ in pool[:n]}:
+                rows = np.array([r for _, j, r in pool[:n] if j == i], dtype=np.int32)
+                chosen[i] = rows[np.argsort(keys[i][rows], kind="stable")]
+    return chosen
+
+
 def _val_batch_limit(cfg) -> int:
     train = cfg.get("train")
     if train is None:
@@ -172,7 +216,8 @@ def _val_batch_limit(cfg) -> int:
 def validation_batches(cfg, specs: list[SourceSpec], indexes: list[SourceIndex], log=print) -> list[list[tuple]]:
     """Holdout clips, capped per source then packed. Batches never mix sources.
 
-    ``data.val.per_source`` is the clip cap per source (hash-stable). ``data.val.max_total_clips``
+    ``data.val.per_source`` is the clip cap per source, or per ``group`` of sources (hash-stable, see
+    ``holdout_rows``). ``data.val.max_total_clips``
     (0 = off) is a global safety cap shared across sources. ``train.val_batches`` (0 = all packed
     batches) is a batch budget, also shared. Both budgets keep every source that still has holdout
     rows, so adding a dataset cannot wipe the ones packed after it.
@@ -181,15 +226,10 @@ def validation_batches(cfg, specs: list[SourceSpec], indexes: list[SourceIndex],
     per_source = int(data["val"]["per_source"])
     max_total = int(data["val"].get("max_total_clips") or 0)
     seed = int(data["loader"]["seed"])
-    chosen: list[np.ndarray] = []
     for spec, index in zip(specs, indexes):
-        rows = np.flatnonzero(index.holdout)
-        if rows.size == 0:
+        if not index.holdout.any():
             log(f"[val] {spec.name}: no holdout rows, skipped")
-            chosen.append(np.empty(0, dtype=np.int32))
-            continue
-        rows = rows[np.argsort(index.keys()[rows], kind="stable")][:per_source]
-        chosen.append(rows.astype(np.int32))
+    chosen = holdout_rows(specs, indexes, per_source)
     counts = [int(rows.size) for rows in chosen]
     clipped = allocate_quota(counts, max_total)
     if clipped != counts:

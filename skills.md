@@ -169,6 +169,7 @@ Qwen 规模主要是算力问题：截断 32B 编码一条约 200 token 的 capt
 - caption dropout 10%，无条件 caption 是 `" "`（token 220）。
 - batch 里的 `waves` 是长度各异的列表。`encode_waves(vae, waves)` 只把等长的片段拼成一批编码：实测把短片段补零到长片段再编码，最后约 10 帧 latent 会变（最大差 1.08），所以不补零。
 - 验证集：每个源取哈希最小的 `val.per_source`（256）条验证行，取中间窗口，不做 dropout，不跨源打包，每次是同一批。
+- 验证分组：源上写 `group: <名>` 后，同组的源在验证里算作一个源。整组共 `val.per_source` 条，按 task 平均分配（某个 task 的 holdout 不够时，剩下的名额分给其他 task），同一 task 内跨源按哈希取最小的若干条。loss 记为 `loss/<组>/<task>`，同时汇总为 `loss/<组>`。控制台只显示顶层名（未分组的源名 + 组名），每个 task 的分项写进 log.jsonl 和 TensorBoard。`group` 不进指纹，加上或去掉都不需要重建索引。WorldSpeech 的 `&ws` 锚点带 `group: ws`（`sources_t2a_ws.yaml` 和 `sources_worldspeech.yaml` 都有）。`t2a_10b_s20_ws` 的验证集为 VR-Foley 1237 条（和 s20 相同）+ ws 256 条（9 种语言各约 30 条，ru 的 holdout 只有 17 条），共 1493 条。
 
 训练器里这样接：
 
@@ -186,22 +187,47 @@ for batch in loader:
 
 加一个数据源：在 `data.sources` 里加一项（`name`、`paths`、`max_records`，按需写 `columns` / `keep` / `fit` / `long`），然后 `bash scripts/data/build_index.sh data.only=[新源名]`。`keep` 的值写成列表表示「取其中任一个」，例如 `qa_risk_level: [clean, medium]`。
 
-**音频内嵌在 Parquet 里的数据（HF `datasets` 格式，如 WorldSpeech）**（`chrome/data/blobs.py`、`scripts/data/repack_audio.sh`）
+**音频内嵌在 Parquet 里的数据（HF `datasets` 格式，如 WorldSpeech）**（`chrome/data/blobs.py`、`scripts/data/migrate_audio.sh`、`scripts/data/repack_audio.sh`）
 
-- HF 分片把整个文件的音频放在一个 ZSTD 字典页里（每个文件 1 个 row group、1024 行、约 110 MB），读任意一条都要解压整列，没法按条随机读。所以先转存一次：音频字节原样拷进未压缩的 Arrow 文件 `<blobs>/<locale>/<分片名>.arrow`，不重编码。转存文件记录源分片的大小和 mtime，没变就跳过；建索引时发现过期或缺失会报错，提示重跑转存。
-- 索引里的音频路径是引用 `<文件>.arrow#<行号>`；读取时内存映射取出这一条的字节，再走和普通文件相同的解码路径（soundfile，失败再用 torchaudio；要裁窗时在内存文件上 seek）。坏文件列表、去重、验证集划分照常按这个字符串处理。
-- 建索引时不读音频列，只投影其余列。伴生 parquet（`sidecar`，`<root>/<locale>/<分片名>`）按行顺序 join：行数不同、`row_index` 或 `segment_id` 对不上都直接报错。同名列以伴生表为准。伴生文件的大小和 mtime 进清单指纹，改了就重建。
+- HF 分片把整个文件的音频放在一个 ZSTD 字典页里（每个文件 1 个 row group、1024 行、约 110 MB），读任意一条都要解压整列，没法按条随机读。所以要转存：音频字节原样拷进未压缩的 Arrow 文件，不重编码，同时带上 `segment_id` 列。写完先读回来和 parquet 的字节逐批比对，一致才改名成正式文件。Arrow 记录源分片的大小和 mtime，没变就跳过。Opus 本身已压缩，Arrow 和 parquet 基本一样大。
+- **WorldSpeech 用 Arrow 替代 parquet**：`scripts/data/migrate_audio.sh` 把 `data/<locale>/<分片>.parquet` 转成同目录的 `<分片>.arrow`，再拿 `qa_sidecar/<locale>/<分片>.parquet` 核对行数和 `segment_id`。`migrate.delete=true` 时，只删除校验和 sidecar 都通过的 parquet；失败的分片保留 parquet，脚本最后列出来并以退出码 1 结束。中断后重跑会接着做；每个分片的结果追加到 `outputs/data/migrate_worldspeech.jsonl`。sidecar 带有 HF 分片除音频外的全部列，parquet 删除后它就是唯一的元数据，不要覆盖其中的原始列。
+- 空音频：`cn_ug`、`kh_km`、`la_lo`、`mm_my`、`vn_vi` 五个语种上游只发布了元数据（`worldspeech_language_coverage.json` 的 `metadata_only`，`audio_in_repo: false`）。2026-10-21 扫了全部 14,056 个 parquet 的 footer：这 5 个语种的 1,356 个分片、1,295,991 行音频全为 null，其余分片没有任何 null。迁移照样写 Arrow（null 原样保留，只有几十 KB），但整片没音频的分片在 `delete=true` 时保留 parquet，日志和报告里标 `no_audio`。建索引时 null 音频的行按 `no_audio` 丢弃（在 `keep` 之前判断，丢弃统计如实反映），不会进训练。
+- 迁移后的数据源以 sidecar 为清单：`paths` 指向 `qa_sidecar/<locale>`，`blobs` 指向 `data/`。清单本身不含音频、但写了 `blobs` 的 parquet，第 i 行的音频就是 `<blobs>/<locale>/<分片>.arrow#i`；行数或 `segment_id` 对不上、Arrow 缺失都直接报错。Arrow 的大小和 mtime 也进清单指纹，重转后会重建索引。
+- 清单 parquet 自带音频的数据源仍走 `repack_audio.sh`：转存到 `<blobs>/<locale>/<分片名>.arrow`，伴生 parquet（`sidecar`）按行顺序 join，行数不同、`row_index` 或 `segment_id` 对不上都直接报错，同名列以伴生表为准。
+- 索引里的音频路径是引用 `<文件>.arrow#<行号>`；读取时内存映射取出这一条的字节，再走和普通文件相同的解码路径（soundfile，失败再用 torchaudio；要裁窗时在内存文件上 seek）。坏文件列表、去重、验证集划分照常按这个字符串处理。训练时不读任何 parquet。
 - 数据源新增三个键：`include`（目录里分片名的 glob，`train-*.parquet` 把 test 分片排除在外）、`sidecar`、`blobs`。没写这三个键的源，指纹和以前一样。
-- 只含 WorldSpeech 的数据配置是 `configs/data/t2a_worldspeech.yaml`（源列表在 `sources_worldspeech.yaml`），用来先跑通新语种，再并进训练配比。
+- 只含 WorldSpeech 的数据配置是 `configs/data/t2a_worldspeech.yaml`（源列表在 `sources_worldspeech.yaml`，迁移参数在它的 `migrate:` 段），用来先跑通新语种，再并进训练配比。片段 3–20 s，各语种不设上限，索引单独放在 `outputs/data/index_ws`（训练配置给部分 locale 设了 `max_records`，同一个源两个配置不一致时不能共用索引目录，否则互相覆盖）。每个有音频的语种一个源（123 个，`ws_<locale>`），筛选条件写在 YAML 锚点 `worldspeech_source` 里共用：`qa_risk_level` 为 clean/medium，`cer ≤ 0.25`（`sources_t2a_ws.yaml` 里的同名锚点要一起改）。`include: "*train-*.parquet"` 是为了把 `in_as_air-train-*`、`tz_sw_bunge-train-*` 这类带前缀的分片名也算进来（13 个语种）；写成 `train-*` 会漏掉它们。按语种控制数据量：在该语种那一行写 `max_hours: 500`（按训练片段秒数累加，即 inspect 的 hours 口径，取路径哈希顺序的前缀，调大只会追加行），也可以用 `max_records`（行数，两者都写取更小的那个）或 `weight`（采样权重，不用重建）。改上限只重建这个语种；没写 `max_hours` 的源指纹不变。
+- 并入训练：`configs/train/t2a_10b_s20_ws.yaml`，源列表在 `configs/data/sources_t2a_ws.yaml`（VR-Foley 五个源照抄，加阿中英法德日韩俄西 9 种语言、30 个 locale；粤语 `ws_yue_hk` 的 task 记为 `speech_zh`）。不写 weight，按保留行数混合。每种语言的 WorldSpeech 部分最多 50 万条（不含 hifitts2 / zhizhou）：超出的英、法、西按各 locale 在该语言里的占比分配 `max_records`（按 sidecar 在 cer ≤ 0.25、3–20 s 条件下的条数算），其余语言全保留，合计约 239 万条；筛选条件或 sidecar 变了要重算。意大利语 WorldSpeech 里没有，pt_br 是固定 28 s 窗口、20 s 以内只剩 933 行，两者留到第二期；训练行数不足 2,000 的 locale 和加泰罗尼亚语 `ws_ca_es` 不接入。韩语转写上游就没有空格和标点，推理时提示词也按这个写法。
+- `data.exclude` 进每个源的指纹。`t2a_10b_s20_ws` 的 exclude 仍是 `preview_set_s20.json`，这样运行中的 s20 读的 VR-Foley 索引原样复用；WorldSpeech 的 preview 片段取自 holdout（本来就不参与训练），只写进 `preview.set`（`preview_set_s20_ws.json`）。`t2a_worldspeech.yaml` 也用 `preview_set_s20.json`，筛出的行和 holdout 与训练索引一致。验证集用默认的 `max_total_clips` 2048（WorldSpeech 按一个组计，见上面的“验证分组”）。
+- 时长下限可以按源设：源上写 `min_seconds: 3` 就覆盖 `audio.min_seconds`。指纹按实际生效的下限算，所以不写的源、或写的值和全局一致的源，指纹都不变。`t2a_10b_s20_ws` 把 `audio.min_seconds` 设为 3（语音源和推理、preview 都能到 3 s），music / freesound / audioset 显式写 `min_seconds: 4`，沿用 s20 的索引；hifitts2、zhizhou 会在 `index_s20` 原位重建，之后 `t2a_10b_s20` 配置会认为这两个索引过期。`t2a_worldspeech.yaml` 也是 3 s。
 
 ```bash
-bash scripts/data/repack_audio.sh --config configs/data/t2a_worldspeech.yaml
+bash scripts/data/migrate_audio.sh migrate.dry_run=true                          # 只报告要转存 / 删除哪些分片
+bash scripts/data/migrate_audio.sh migrate.locales=[yue_hk]                      # 转存一个语种，保留 parquet
+bash scripts/data/migrate_audio.sh migrate.locales=[yue_hk] migrate.delete=true  # 再删掉它校验通过的 parquet
+bash scripts/data/migrate_audio.sh migrate.workers=32 migrate.delete=true        # 全部 128 个语种
 bash scripts/data/build_index.sh --config configs/data/t2a_worldspeech.yaml
 bash scripts/data/inspect_data.sh --config configs/data/t2a_worldspeech.yaml
 bash scripts/data/bench_loader.sh --config configs/data/t2a_worldspeech.yaml bench.output_dir=outputs/data/bench_ws
 ```
 
-yue_hk 实测（2026-10-20，`max_seconds=15`）：169 个 train 分片、172,104 行，转存 17.4 GiB 用时 19 s（约 2 GB/s，32 进程）。建索引 91 s，留下 82,345 条训练行加 48 条验证行，共 297 h。丢弃：超过 15 s 的 72,935 条，`qa_risk_level=high` 的 16,560 条，短于 4 s 的 216 条。片段几乎都在 11–15 s，90% 需要补齐。loader 单进程 12 个 worker 跑到 7.8 batch/s、174 条/s，包填充率 97%。Opus 解码比读 wav 慢（同配置下 VR-Foley 五个源是 32 batch/s），但 10B 每步 3.4 s，仍有二十多倍余量。`resp` 里的 `[Cantonese][Cantonese]` 按原样保留。
+yue_hk 实测（2026-10-20，`max_seconds=15`，迁移前的旧流程：Arrow 在 `outputs/data/audio_arrow`、清单是 HF parquet）：169 个 train 分片、172,104 行，转存 17.4 GiB 用时 19 s（约 2 GB/s，32 进程）。建索引 91 s，留下 82,345 条训练行加 48 条验证行，共 297 h。丢弃：超过 15 s 的 72,935 条，`qa_risk_level=high` 的 16,560 条，短于 4 s 的 216 条。片段几乎都在 11–15 s，90% 需要补齐。loader 单进程 12 个 worker 跑到 7.8 batch/s、174 条/s，包填充率 97%。Opus 解码比读 wav 慢（同配置下 VR-Foley 五个源是 32 batch/s），但 10B 每步 3.4 s，仍有二十多倍余量。`resp` 里的 `[Cantonese][Cantonese]` 按原样保留。
+
+**CommonVoice 26.0**（`scripts/data/prepare_commonvoice.sh`、`configs/data/sources_t2a_ws_cv.yaml`、`configs/train/t2a_10b_s20_ws_cv.yaml`）
+
+- 原始清单：`${paths.commonvoice_raw}`（`ASR/jsonl/commonvoice_<locale>_26.0.resp.jsonl`），16 个 locale：ar de en es fr it ja ko nan-tw pt ru th yue zh-CN zh-HK zh-TW，共 340 万行。普通 JSONL，不需要转存：`path` 指向 mp3（32 / 48 kHz 单声道，libsndfile 1.2.2 直接解，约 3–4 ms/条），`duration` 和文件一致，`resp` 已是 `[SPEECH]: <d>[语言][方言][性别][年龄] 文本</d>`（性别、年龄可缺，和 zhizhou 同一写法）。只含 validated 子集，`set` 的 train / dev / test 全部拿来训练，验证集照常按路径哈希留出。没有 cer / dnsmos 之类的质量列，众包录音，音质不如 hifitts2。
+- 方言标签对齐 WorldSpeech：原始 es 全标 `[Spanish][Peninsular]`（其中 35% 是墨西哥口音），en 全标 `[English][English]`，zh-HK 标 `[Cantonese][Hong Kong]`。`prepare_commonvoice.sh` 按说话人的 `accents` 字段改写 es / en 的方言标签（Mexican / Argentinian（Rioplatense）/ Chilean / Peninsular（西班牙本土，加那利群岛除外）；American / British / Indian / Canadian / Australian / South African / Scottish / Irish / Northern Irish / New Zealand / Welsh / Filipino / Hong Kong / Singaporean / Malaysian / Caribbean），口音为空、识别不了或多个口音互相矛盾时用通用标签 `[Spanish][Spanish]` / `[English][English]`；zh-HK 改为 `[Cantonese][Cantonese]`；其余 locale 原样复制。只改 `resp` 和 `dialect`，原标签留在 `dialect_cv`。输出到 `${paths.commonvoice_jsonl}`（`ASR/jsonl_chrome/`，含 `report.json` 映射计数），训练读这一份。
+- 源：每个 locale 一个（`cv_<locale>`），锚点 `&cv` 带 `group: cv`、`columns: {caption: resp, duration: duration}`、`holdout_ppm: 2000`（`cv_ko` 只有 1.7k 行，用 20000），保证每种语言有二十条以上的 holdout。task 沿用 WorldSpeech 的 `speech_<lang>`，新增 `speech_it`、`speech_pt`、`speech_th`、`speech_nan`；zh-CN、zh-TW、yue、zh-HK 都记为 `speech_zh`。闽南语 `cv_nan_tw` 的 77% 短于 3 s，单独写 `min_seconds: 2`，其余 3 s。
+- 配额（每种语言的 CommonVoice 部分）：en 20 万（hifitts2 + WorldSpeech 已有 350 万），de / fr / es 各 30 万，其余全部保留。2026-10-23 建索引（`index_s20`，32 进程共 237 s）后留下 1,583,291 条训练行、2,586 h，另有 6,588 条 holdout；在整个混合（1489 万条、40,708 h）里按行数占 10.6%、按时长占 6.4%（CV 平均 5.9 s，比其他语音短）。各源训练行数：en 200,000 / de 300,000 / fr 300,000 / es 300,000 / it 189,352 / ru 43,099 / zh_cn 45,193 / th 43,108 / ar 38,915 / pt 32,943 / ja 27,571 / nan_tw 19,853 / zh_hk 15,961 / yue 14,673 / zh_tw 11,108 / ko 1,515。除配额截掉的部分外，丢弃的几乎都是 `too_short`。
+- 并入训练：`t2a_10b_s20_ws_cv.yaml` 继承 `t2a_10b_s20_ws.yaml`，源列表 `sources_t2a_ws_cv.yaml` 把 `sources_t2a_ws.yaml` 整份照抄（列表会被替换，不会合并，两份要一起改），后面加 16 个 `cv_*`。`index_root` 和 `data.exclude` 不变，s20_ws 的索引原样复用，只新建 `cv_*`。验证集多一个 cv 组 256 条（13 种语言，每种约 20 条）。`preview.set` 用 `preview_set_s20_ws.json` 的 32 条加 14 条 CommonVoice holdout，每种语言一条（`cv en british`、`cv es mexican`、`cv minnan` 等），GT 导出在 `outputs/eval/preview_gt_s20_ws_cv/`。Qwen3-ASR 不支持闽南语，`preview_cv_minnan` 的 ASR 结果记为 unknown，没有参考意义。
+
+```bash
+bash scripts/data/prepare_commonvoice.sh
+bash scripts/data/build_index.sh --config configs/train/t2a_10b_s20_ws_cv.yaml data.build.workers=32
+bash scripts/data/inspect_data.sh --config configs/train/t2a_10b_s20_ws_cv.yaml
+bash scripts/train/dump_preview_gt.sh configs/train/t2a_10b_s20_ws_cv.yaml --out outputs/eval/preview_gt_s20_ws_cv
+bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20_ws_cv.yaml
+```
 
 ### VR-Foley 五个源的实测（2026-10-12）
 
@@ -304,7 +330,7 @@ Chrome-10B/
 │   ├── data/
 │   │   ├── audio_io.py               read_audio、read_audio_window、resample（核缓存）、to_stereo、limit_peak、load_audio、save_audio
 │   │   ├── manifest.py               JSONL / Parquet 清单：列名候选、keep 过滤、分块、伴生表 join
-│   │   ├── blobs.py                  Parquet 内嵌音频 → Arrow 转存，`<文件>.arrow#<行>` 引用的读取
+│   │   ├── blobs.py                  Parquet 内嵌音频 → Arrow 转存 / 原地迁移，`<文件>.arrow#<行>` 引用的读取
 │   │   ├── captions.py               H3 tokenizer 加载、caption → ids、NULL_CAPTION
 │   │   ├── index.py                  LengthPolicy、SourceSpec、并行建索引、SourceIndex
 │   │   ├── sampler.py                MixtureBatchSampler（加权混合、token 打包、续训）、验证集用的固定 batch
@@ -347,18 +373,23 @@ Chrome-10B/
 │   ├── vae/h3_frozen.yaml            冻结的 H3 VAE + 对齐检查参数
 │   ├── data/t2a_base.yaml            数据管线参数（索引、长度、loader、验证集、bench）
 │   ├── data/sources_vrfoley.yaml     VR-Foley 的五个数据源和权重
-│   ├── data/sources_worldspeech.yaml WorldSpeech 各语种（内嵌音频 + QA 伴生表），t2a_worldspeech.yaml 单独使用
+│   ├── data/sources_worldspeech.yaml WorldSpeech 各语种（qa_sidecar 清单 + data/ 下的 Arrow 音频），t2a_worldspeech.yaml 单独使用
+│   ├── data/sources_t2a_ws.yaml      VR-Foley 五个源 + WorldSpeech 9 种语言的 30 个 locale（t2a_10b_s20_ws 用）
+│   ├── data/sources_t2a_ws_cv.yaml   sources_t2a_ws.yaml + CommonVoice 16 个 locale（t2a_10b_s20_ws_cv 用）
 │   ├── dit/{tiny,1b,10b}.yaml        DiT 预设
 │   ├── text/{qwen3vl_32b,random}.yaml
 │   ├── train/t2a_base.yaml           task / layout / flow / train / preview / infer / text_cache 全部参数
 │   ├── train/t2a_smoke.yaml          tiny + 500 条，DDP
 │   ├── train/t2a_1b.yaml             1B 消融基线，FSDP
 │   ├── train/t2a_10b.yaml            10B，FSDP（多机时 shard_size=8 即 HSDP）
-│   └── eval/preview_set.json
+│   ├── train/t2a_10b_s20.yaml        10B，20 s，从 t2a_10b 的 EMA 初始化
+│   ├── train/t2a_10b_s20_ws.yaml     10B，20 s，加入 WorldSpeech，从 t2a_10b_s20 的 EMA 初始化
+│   ├── train/t2a_10b_s20_ws_cv.yaml  10B，20 s，再加入 CommonVoice，从 t2a_10b_s20_ws 的 EMA 初始化
+│   └── eval/preview_set{,_s20,_s20_ws,_s20_ws_cv}.json
 ├── scripts/
 │   ├── env.sh                        PYTHON、PYTHONPATH
 │   ├── vae/check_h3_parity.sh
-│   ├── data/{repack_audio,build_index,inspect_data,bench_loader,check_data_pipeline}.sh
+│   ├── data/{migrate_audio,repack_audio,prepare_commonvoice,build_index,inspect_data,bench_loader,check_data_pipeline}.sh
 │   ├── text/cache_text.sh            预填文本缓存 + 写 stats.safetensors
 │   ├── dit/check_t2a_stack.sh        S2 单测（CPU 即可）
 │   ├── train/train_t2a.sh            torchrun 启动，单机 / 多机

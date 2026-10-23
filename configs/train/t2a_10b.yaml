@@ -28,6 +28,8 @@ train:
   preview_every: 1000
   ckpt_every: 2000
   keep_ckpts: 1
+  # Full 173 GB snapshot on JuiceFS; other ranks poll, they do not NCCL-wait.
+  ckpt_timeout_minutes: 120
   # All per_source holdout clips (≈256/source, 1237 clips / 45 batches today). 0 = do not prefix-cut.
   val_batches: 0
 

@@ -19,6 +19,11 @@
 #   bash scripts/train/kill_t2a.sh configs/train/t2a_10b.yaml
 #   bash scripts/train/kill_t2a.sh --force
 #
+# After a mid-run c10d / RendezvousConnectionError (rank 0 hung writing the 173 GB snapshot):
+#   bash scripts/train/kill_t2a.sh
+#   bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20.yaml
+# resume=auto continues checkpoints/latest (last complete step). Incomplete step_* dirs are dropped.
+#
 # TensorBoard (another terminal; also imports an older run's log.jsonl / samples/):
 #   bash scripts/train/tensorboard.sh outputs/train/t2a_10b
 #   bash scripts/train/tensorboard.sh outputs/train
@@ -42,6 +47,9 @@ if [[ -z "${NPROC:-}" ]]; then
 fi
 NPROC=$(( NPROC > 0 ? NPROC : 1 ))
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-8}"
+# Rank-0 hosts the c10d TCPStore. A 10B JuiceFS write can stall that process; give the NCCL
+# watchdog long enough that a slow-but-alive writer is not treated as a dead rank.
+export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC="${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-1800}"
 
 NNODES="${NNODES:-1}"
 if [[ "${NNODES}" -gt 1 ]]; then

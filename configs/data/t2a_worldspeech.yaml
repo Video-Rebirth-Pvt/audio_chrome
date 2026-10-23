@@ -1,9 +1,44 @@
 # WorldSpeech-only data config: the T2A pipeline of t2a_base.yaml with sources_worldspeech.yaml as the
 # whole source list (a later list replaces an earlier one). For bringing up new locales before they join
-# the training mixture.
+# the training mixture. Clips of 3–20 s, like the speech of t2a_10b_s20_ws. Every locale uncapped, in its
+# own index root: the training config caps en / fr / es locales with max_records, and two configs that
+# disagree on a source must not share its index dir (each build would overwrite the other's).
 #
-# bash scripts/data/repack_audio.sh --config configs/data/t2a_worldspeech.yaml
-# bash scripts/data/build_index.sh --config configs/data/t2a_worldspeech.yaml
+# bash scripts/data/migrate_audio.sh migrate.locales=[yue_hk]
+# bash scripts/data/build_index.sh --config configs/data/t2a_worldspeech.yaml                         # all 123 locales
+# bash scripts/data/build_index.sh --config configs/data/t2a_worldspeech.yaml data.only=[ws_yue_hk]
 # bash scripts/data/inspect_data.sh --config configs/data/t2a_worldspeech.yaml
 # bash scripts/data/bench_loader.sh --config configs/data/t2a_worldspeech.yaml bench.output_dir=outputs/data/bench_ws
 _base_: [t2a_base.yaml, sources_worldspeech.yaml]
+
+# Same exclude list as t2a_10b_s20(_ws), so row counts and holdout match the training indexes.
+paths:
+  preview_set: configs/eval/preview_set_s20.json
+
+audio:
+  # Same 3 s floor as the speech sources of t2a_10b_s20_ws.
+  min_seconds: 3
+  max_seconds: 20
+
+data:
+  index_root: ${paths.output_root}/data/index_ws
+
+# scripts/data/migrate_audio.sh: <root>/<locale>/<shard>.parquet → <shard>.arrow in the same dir.
+migrate:
+  root: ${paths.worldspeech_root}
+  # Every shard's segment_ids are checked against <sidecar>/<locale>/<shard>.parquet; required for delete.
+  sidecar: ${paths.qa_sidecar_root}
+  # null: every locale dir under root; or a list, e.g. [yue_hk, en_us].
+  locales: null
+  # Test shards too: their sidecars exist and the parquet goes away with the rest.
+  include: "*.parquet"
+  # Each worker holds one decoded shard (100–400 MB). The shared disk also feeds running training jobs.
+  workers: 16
+  # Delete each parquet once its Arrow file is verified and matches its sidecar.
+  delete: false
+  # Only report which shards need a repack (and would be deleted); writes nothing.
+  dry_run: false
+  # Rewrite Arrow files even when current.
+  force: false
+  # One JSON line per shard (repacked, deleted, rows, bytes, error), appended across runs.
+  report: ${paths.output_root}/data/migrate_worldspeech.jsonl

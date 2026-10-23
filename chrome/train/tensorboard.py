@@ -1,10 +1,12 @@
 """TensorBoard writer for a Chrome run: scalars from log.jsonl records, audio from samples/.
 
     <run_dir>/tb/                 SummaryWriter event files
-    <run_dir>/tb/cursor.json      last imported train/val step and preview steps (idempotent sync)
+    <run_dir>/tb/cursor.json      last imported train/val/asr step and preview steps (idempotent sync)
 
 Live training writes each ``_record`` / preview. ``python -m chrome.train.tensorboard <run_dir>``
 imports anything not yet in the cursor, so a run that started before this module still plots.
+``<run_dir>/asr_log.jsonl`` (written by chrome.eval.asr_preview in another process) is picked up at
+sync and whenever it grows between training records.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ import torch
 SKIP = frozenset({"event", "step"})
 CURSOR = "cursor.json"
 AUDIO_LAYOUT = "stereo"
+ASR_LOG = "asr_log.jsonl"
 
 
 def flatten_scalars(record: dict[str, Any]) -> dict[str, float]:
@@ -100,6 +103,7 @@ class TensorBoardLogger:
         self.audio = bool(audio)
         self.writer = None
         self.cursor: dict[str, Any] = {"scalars": {}, "audio_steps": []}
+        self._asr_size = -1
         self._log = log or (lambda message: print(message, flush=True))
         if not enabled:
             return
@@ -127,6 +131,41 @@ class TensorBoardLogger:
         seen[event] = max(int(seen.get(event, -1)), step)
         self._save_cursor()
         self.writer.flush()
+        if event != "asr":
+            self._poll_asr()
+
+    def _import_log(self, path: Path) -> dict[str, int]:
+        """Rows newer than the per-event cursor. Returns rows written per event."""
+        written: dict[str, int] = {}
+        if not path.is_file():
+            return written
+        seen = self.cursor.setdefault("scalars", {})
+        with path.open() as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                event = str(record.get("event") or "train")
+                step = int(record.get("step", -1))
+                if step <= int(seen.get(event, -1)):
+                    continue
+                self.log_record(record)
+                written[event] = written.get(event, 0) + 1
+        return written
+
+    def _poll_asr(self) -> int:
+        path = self.run_dir / ASR_LOG
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return 0
+        if size == self._asr_size:
+            return 0
+        self._asr_size = size
+        return self._import_log(path).get("asr", 0)
 
     def log_previews(self, step: int, sample_dir: Path) -> None:
         if self.writer is None or not self.audio or not sample_dir.is_dir():
@@ -152,24 +191,10 @@ class TensorBoardLogger:
         """Import jsonl rows and sample dirs newer than the cursor. Returns (train, val, audio steps) written."""
         if self.writer is None:
             return 0, 0, 0
-        n_train = n_val = 0
-        log_path = self.run_dir / "log.jsonl"
-        if log_path.is_file():
-            seen = self.cursor.setdefault("scalars", {})
-            with log_path.open() as handle:
-                for line in handle:
-                    if not line.strip():
-                        continue
-                    record = json.loads(line)
-                    event = str(record.get("event") or "train")
-                    step = int(record.get("step", -1))
-                    if step <= int(seen.get(event, -1)):
-                        continue
-                    self.log_record(record)
-                    if event == "val":
-                        n_val += 1
-                    else:
-                        n_train += 1
+        written = self._import_log(self.run_dir / "log.jsonl")
+        n_val = written.pop("val", 0)
+        n_train = sum(written.values())
+        self._poll_asr()
         n_wav = 0
         samples = self.run_dir / "samples"
         if self.audio and samples.is_dir():

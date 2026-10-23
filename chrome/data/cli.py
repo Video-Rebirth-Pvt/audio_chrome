@@ -2,6 +2,7 @@
 
 Run from the Chrome-10B root (the shell launchers do this):
     bash scripts/data/repack_audio.sh --config configs/data/t2a_worldspeech.yaml
+    bash scripts/data/migrate_audio.sh migrate.locales=[yue_hk]
     bash scripts/data/build_index.sh                       # all sources; unchanged ones are skipped
     bash scripts/data/build_index.sh data.only=[music] data.build.force=true
     bash scripts/data/inspect_data.sh inspect.world_size=64
@@ -60,6 +61,60 @@ def cmd_repack(cfg) -> int:
         _log(f"[repack] {spec.name}: {result['files'] - result['skipped']} written, {result['skipped']} up to date")
     print(f"[repack] done in {time.monotonic() - started:.0f}s")
     return 0
+
+
+def cmd_migrate(cfg) -> int:
+    from chrome.data.blobs import BLOB_SUFFIX, blob_path, migrate
+    from chrome.data.manifest import sidecar_path
+
+    settings = cfg["migrate"]
+    root = Path(settings["root"])
+    sidecar = settings.get("sidecar")
+    delete, dry_run = bool(settings["delete"]), bool(settings["dry_run"])
+    if delete and not sidecar:
+        raise SystemExit("migrate.delete needs migrate.sidecar: the sidecar keeps every non-audio column")
+    locales = [str(n) for n in settings.get("locales") or []] or sorted(p.name for p in root.iterdir() if p.is_dir())
+    jobs, migrated = [], 0
+    for locale in locales:
+        folder = root / locale
+        if not folder.is_dir():
+            raise SystemExit(f"no locale dir {folder}")
+        shards = sorted(folder.glob(str(settings["include"])))
+        parquets = [f for f in shards if f.suffix == ".parquet"]
+        stems = {f.stem for f in parquets}
+        migrated += sum(1 for f in folder.glob(f"*{BLOB_SUFFIX}") if f.stem not in stems)
+        jobs += [
+            {
+                "parquet": str(f),
+                "blob": str(blob_path(root, f)),
+                "sidecar": str(sidecar_path(sidecar, f)) if sidecar else None,
+                "delete": delete,
+                "dry_run": dry_run,
+                "force": bool(settings["force"]),
+            }
+            for f in parquets
+        ]
+    mode = "dry run" if dry_run else ("repack + delete parquet" if delete else "repack only")
+    _log(f"[migrate] {len(locales)} locale(s), {len(jobs)} parquet shard(s) to process, {migrated} already "
+         f"migrated (Arrow without parquet); mode: {mode}")
+    if not jobs:
+        return 0
+    result = migrate(jobs, int(settings["workers"]), settings.get("report"), log=_log)
+    if dry_run:
+        _log(f"[migrate] dry run: {result['repacked']} shard(s) need a repack, {result['files'] - result['repacked']} "
+             f"current; parquet total {result['bytes'] / 2**30:.1f} GiB" + (" would be deleted" if delete else ""))
+    else:
+        _log(f"[migrate] {result['repacked']} repacked ({result['bytes'] / 2**30:.1f} GiB), {result['deleted']} parquet "
+             f"deleted ({result['freed'] / 2**30:.1f} GiB freed), {result['failed']} failed"
+             + (f"; log: {settings['report']}" if settings.get("report") else ""))
+    if result["nulls"]:
+        _log(f"[migrate] null audio: {result['no_audio']} shard(s) without any audio keep their parquet; "
+             f"{result['null_rows']} null clip(s) in all, dropped as no_audio at index build")
+        for locale, (empty, partial, clips) in result["nulls"].items():
+            _log(f"[migrate]   {locale}: {empty} shard(s) without audio, {partial} with some null clips, {clips} null clips")
+    for failure in result["failures"][:20]:
+        _log(f"[migrate]   {failure['file']}: {failure['error']}")
+    return 1 if result["failed"] else 0
 
 
 def cmd_build(cfg) -> int:
@@ -143,13 +198,15 @@ def cmd_inspect(cfg) -> int:
     rows = []
     for i, spec in enumerate(specs):
         epochs = share[i] * per_step * steps / max(train_rows[i], 1)
-        cap = "all" if spec.max_records is None else f"{spec.max_records:g}"
+        caps = ([f"{spec.max_records:g}"] if spec.max_records is not None else []) + (
+            [f"{spec.max_hours:g} h"] if spec.max_hours is not None else [])
+        cap = " / ".join(caps) or "all"
         mix = "rows" if spec.weight is None else f"{spec.weight:g}"
         rows.append([spec.name, cap, mix, f"{share[i]:.1%}", f"{hours[i] / hours.sum():.1%}",
                      f"{share[i] * cost[i] / (share * cost).sum():.1%}", f"{epochs:.2f}"])
     print(f"\nMixture: ≈{per_batch:.1f} clips per batch of {data['loader']['max_tokens']} tokens, "
           f"{per_step:.0f} clips per step (world {inspect['world_size']} × accum {inspect['grad_accum']})")
-    print(_table(rows, ["source", "max_records", "weight", "clips", "audio hours", "tokens", f"epochs / {steps} steps"]))
+    print(_table(rows, ["source", "cap", "weight", "clips", "audio hours", "tokens", f"epochs / {steps} steps"]))
 
     if inspect.get("duplicates", True) and len(specs) > 1:
         keys = {s.name: SourceIndex(root / s.name).keys() for s in specs}
@@ -248,12 +305,14 @@ def cmd_bench(cfg) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["repack", "build", "inspect", "bench"])
+    parser.add_argument("command", choices=["repack", "migrate", "build", "inspect", "bench"])
     parser.add_argument("--config", default="configs/data/t2a_base.yaml")
     parser.add_argument("overrides", nargs="*", help="dotlist overrides, e.g. data.only=[music]")
     args = parser.parse_intermixed_args()
     cfg = load_config(ROOT / args.config, args.overrides)
-    return {"repack": cmd_repack, "build": cmd_build, "inspect": cmd_inspect, "bench": cmd_bench}[args.command](cfg)
+    commands = {"repack": cmd_repack, "migrate": cmd_migrate, "build": cmd_build, "inspect": cmd_inspect,
+                "bench": cmd_bench}
+    return commands[args.command](cfg)
 
 
 if __name__ == "__main__":

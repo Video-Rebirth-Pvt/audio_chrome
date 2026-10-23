@@ -1,0 +1,370 @@
+[
+  {
+    "domain": "music",
+    "slot": 0,
+    "label": "solo piano",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/llp/data/music2_clip/(01) Piano Concerto No.3 in C minor Op.37 - I.Allegro con brio_slice_80.flac",
+    "caption": "[MUSIC]: <d>A virtuosic piano cascades in a dramatic atmosphere, weaving a complex musical tapestry. This solo piano piece, characteristic of late Romantic or early 20th-century classical music, features no vocals. The instrument performs rapid arpeggios and intricate melodic runs across its full range, demonstrating a high level of technical skill. The music conveys a theme of intense, restless energy, shifting between powerful, fortissimo chords and delicate, pianissimo passages. This dynamic contrast creates a turbulent and emotionally charged atmosphere. The recording quality is clear and resonant, capturing the rich harmonic overtones and percussive attack of the grand piano with excellent fidelity, suggesting a modern, high-quality studio or concert hall recording.</d>",
+    "duration": 10.1
+  },
+  {
+    "domain": "music",
+    "slot": 1,
+    "label": "acoustic guitar",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/llp/data/music2_clip/(01) La Forqueray (Troisieme livre de pieces de clavecin, 1756)_slice_23.flac",
+    "caption": "[MUSIC]: <d>An acoustic guitar weaves through a contemplative atmosphere with intricate fingerpicking. This instrumental piece, characteristic of solo acoustic folk or classical guitar, features no vocals. The steel-string guitar provides both melody and harmony, with a clear, bright tone and a moderate tempo. The performance showcases complex arpeggiated chords and melodic runs across the fretboard, suggesting a high level of technical skill. The music conveys a theme of thoughtful introspection, creating a calm and intimate sonic environment. The recording quality is clean and direct, capturing the natural resonance and subtle nuances of the instrument's performance with minimal processing, resulting in a dry, present sound that highlights the musician's dexterity.</d>",
+    "duration": 10.1
+  },
+  {
+    "domain": "speech",
+    "slot": 0,
+    "label": "dialogue",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/hifitts-2/audio_44khz/16/1525/16_1525_fame_fortune_0910_librivox-fameandfortune_01_alger_46.flac",
+    "caption": "[SPEECH]: <d>[English] Yes,\" said Dick, \"and I might have saved more if I'd begun sooner.\" \"How long has it taken you to save it up?\" \"About nine months.</d>",
+    "duration": 9.92
+  },
+  {
+    "domain": "speech",
+    "slot": 1,
+    "label": "narration",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/hifitts-2/audio_44khz/20/1347/20_1347_daisy_miller_0708_librivox-daisymiller_1_james_19.flac",
+    "caption": "[SPEECH]: <d>[English] he had been put to school there as a boy, and he had afterward gone to college there - circumstances which had led to his forming a great many youthful friendships.</d>",
+    "duration": 10.48
+  },
+  {
+    "domain": "freesound",
+    "slot": 0,
+    "label": "footsteps",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/FreeSound/train/113405_frame_30_40.flac",
+    "caption": "This audio features footsteps crunch on a gravelly surface in a quiet outdoor environment. The detailed audio description is a quiet, open outdoor space. The primary sound is the rhythmic crunching and grinding of footsteps on a loose surface, likely gravel, dry leaves, or crusty snow. First footsteps begin, characterized by a sharp, crunching sound with each step.",
+    "duration": 10.0
+  },
+  {
+    "domain": "freesound",
+    "slot": 1,
+    "label": "rock drums",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/FreeSound/train/405549_frame_90_100.flac",
+    "caption": "This audio features a drum fill introduces a rock beat with a cymbal crash. The detailed audio description is a studio or performance space. First a rapid drum fill plays across several tom-toms, descending in pitch. Then a kick drum and snare drum establish a steady rock beat. Finally a cymbal crashes and sustains. This audio contains music. The music description is a Rock piece with instruments like Drum kit (tom-toms, kick drum, snare drum, cymbals), tempo is medium-fast, emotional tone is energetic and driving.",
+    "duration": 10.0
+  },
+  {
+    "domain": "audioset",
+    "slot": 0,
+    "label": "bird call",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/AudioSet/data/audio/unbal_train/pKZR180SZKU.flac",
+    "caption": "This audio features a bird chirps in an outdoor setting with a distinct, sharp call. The detailed audio description is an outdoor, natural environment. The primary sound is a bird call. First a bird emits a series of sharp, high-pitched chirps. Finally the bird emits a second, similar series of chirps.",
+    "duration": 10.0
+  },
+  {
+    "domain": "audioset",
+    "slot": 1,
+    "label": "rain",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/AudioSet/data/audio/unbal_train/FCtJs4O5Vaw.flac",
+    "caption": "This audio features rain falls steadily in an outdoor environment. The detailed audio description is an outdoor setting during a rain shower. The primary sound is the continuous, percussive impact of raindrops striking a surface, creating a dense and layered soundscape. The sound suggests a moderate to heavy rainfall.",
+    "duration": 10.0
+  },
+  {
+    "domain": "music",
+    "slot": 2,
+    "label": "vocal lyric",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/llp/data/music4_clip/(01) [Michael Jackson] 01 - billie jean_slice_24.flac",
+    "caption": "[MUSIC]: <d>A funky bassline grooves in an upbeat atmosphere with a vibrant female vocal. This Disco-Funk track features a high-pitched female voice singing in English with a fast, energetic delivery. The vocalist sings the phrase <S> She knows what's going on <E> over a dense arrangement driven by a prominent electric bass, a four-on-the-floor drum machine beat, and rhythmic electric guitar chords. The music conveys a theme of confident awareness, creating a lively and danceable atmosphere. The production quality is polished and bright, with a clean mix that emphasizes the rhythmic interplay between the bass, drums, and vocals, characteristic of late 1970s or early 1980s funk and disco production styles.</d>",
+    "duration": 10.1
+  },
+  {
+    "domain": "speech",
+    "slot": 2,
+    "label": "zh mandarin male young",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/ffe45c31-be0d-409e-bd70-98b96db8a74a.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Male][Young] 啊，喜欢喝绿茶，没问题。我家里面冰箱还有，今年明前龙井，到时候给你带一个，一小罐，泡一跑喝，一喝。</d>",
+    "duration": 9.33
+  },
+  {
+    "domain": "speech",
+    "slot": 3,
+    "label": "zh mandarin female young",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/d7cfce75-a3ee-4690-a525-e84f5783cbd4.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Female][Young] 其实生存类游戏你要玩明白也是挺难的 你像那缺氧 哎呦 你得自己学好多知识呢</d>",
+    "duration": 10.338
+  },
+  {
+    "domain": "speech",
+    "slot": 4,
+    "label": "zh mandarin male adult",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/1c074a20-ec5f-4a32-ad5a-4aefe27e9576.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Male][Adult] 烤箱那个没有灵魂，你知道吧？烧烤这个东西嘛，对吧？需要有火、有烟，哎，这个才有那个烧烤的灵魂在。</d>",
+    "duration": 10.27
+  },
+  {
+    "domain": "speech",
+    "slot": 5,
+    "label": "zh mandarin female middle",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/57e327cf-e338-4e94-acd0-23ff386cb702.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Female][Middle][Whisper] 你们那边的人喜欢吃辣吗？哎呀，我不晓得，哪里的人就是口味会重一点，反正我的话，我也是顿顿想要吃点辣的。</d>",
+    "duration": 11.57
+  },
+  {
+    "domain": "speech",
+    "slot": 6,
+    "label": "zh sichuan male adult",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/8de4a438-ba32-41bb-b596-5134dea81f9c.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Sichuan][Male][Adult][Sigh] 嗯，不对，听，哎呀，听不出来了，听不出来了，你直接跟我说噻，那到底是哪儿的嘛？</d>",
+    "duration": 11.1
+  },
+  {
+    "domain": "speech",
+    "slot": 7,
+    "label": "zh cantonese female adult",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/2087c1fd-db39-49d2-aa30-c082c4793132.wav",
+    "caption": "[SPEECH]: <d>[Cantonese][Cantonese][Female][Adult] 好多人好难搞啊？五号那的呀？五号那个我没难过哦，反正清楚了也没得分要回来。</d>",
+    "duration": 10.14
+  },
+  {
+    "domain": "speech",
+    "slot": 8,
+    "label": "zh taiwan male young",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/dae32fea-957b-4821-8300-86dbbf76b4f6.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Taiwan][Male][Young] 那样子就是太过于以自我为中心了，反正好像都是要按他的想法来，那确实是不太好。</d>",
+    "duration": 8.93
+  },
+  {
+    "domain": "speech",
+    "slot": 9,
+    "label": "zh mandarin female adult whisper",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/11d6002d-4723-4d53-a622-5e9734bfe518.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Female][Adult][Whisper] 就是顾客这边说说点了我要点这道菜，然后那边厨师就开始已经炒了，他是完全可以看见的。</d>",
+    "duration": 12.89
+  },
+  {
+    "domain": "speech",
+    "slot": 10,
+    "label": "zh mandarin male adult singing",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/c8c8d3dc-7add-4919-9951-c8712f9e4839.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Male][Adult][Singing] 我怕来不及，我要抱着你，直到感觉你的皱纹有了岁月的痕迹。</d>",
+    "duration": 12.828
+  },
+  {
+    "domain": "speech",
+    "slot": 11,
+    "label": "narration 20s",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/hifitts-2/audio_44khz/19/1646/19_1646_histofengch13_0804_librivox-historyofengland03ch13_02_macaulay_10.flac",
+    "caption": "[SPEECH]: <d>[English] It could hardly be doubted that they were directed by some leader of great weight. They showed themselves little in any public place, but it was known that every cellar was filled with them, and it might well be apprehended that at the first signal, they would pour forth from their caverns and appear armed round the Parliament House.</d>",
+    "duration": 19.92
+  },
+  {
+    "domain": "speech",
+    "slot": 12,
+    "label": "zh mandarin female young 20s",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/zhizhou_soul/private_chat_06_03/denoised_test_files/26971708-28aa-4e5f-9d4b-9369328926ed.wav",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Female][Young] 那看来你也是个人生导师呀？之前的话一直在给人家做心理辅导，说明你就像我领导一样，每天呢都是在给别人做辅导，在给人家总结工作、总结经验、总结走过的路、看过的风景、遇到的人和事。</d>",
+    "duration": 19.93
+  },
+  {
+    "domain": "speech",
+    "slot": 13,
+    "label": "ws zh taiwan",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/WorldSpeech/data/zh_tw/train-00328.arrow#1329",
+    "caption": "[SPEECH]: <d>[Chinese][Taiwan] 太可惜了，如果未來我們要重建臺灣歷史現場，我覺得水下文資的考古、調研，是一個非常重要的領域，我們也希望文化部可以重視。以上，謝謝</d>",
+    "duration": 13.49
+  },
+  {
+    "domain": "speech",
+    "slot": 14,
+    "label": "ws cantonese",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/WorldSpeech/data/yue_hk/train-00297.arrow#28",
+    "caption": "[SPEECH]: <d>[Cantonese][Cantonese] 主席，剛才局長在主體答覆中，以及在最近的長遠減碳策略公眾諮詢文件中，均一再提及要透過區域合作以增加本地潔淨能源的比例。</d>",
+    "duration": 12.67
+  },
+  {
+    "domain": "speech",
+    "slot": 15,
+    "label": "ws en american",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/WorldSpeech/data/en_us/train-00101.arrow#1268",
+    "caption": "[SPEECH]: <d>[English][American] a lesson we can all learn from the late great Anne Seaton. Anne is greatly missed and will not soon be forgotten.</d>",
+    "duration": 12.14
+  },
+  {
+    "domain": "speech",
+    "slot": 16,
+    "label": "ws fr canadian",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/WorldSpeech/data/ca_fr/train-00066.arrow#1331",
+    "caption": "[SPEECH]: <d>[French][Canadian] Et, dans cette lettre, mon père écrivait la chose suivante, à la fin de la lettre, il disait: «Allons bâtir des quotidiens qui ressemblent à nos rêves.» C'est ce qu'il disait à ma mère.</d>",
+    "duration": 13.88
+  },
+  {
+    "domain": "speech",
+    "slot": 17,
+    "label": "ws de austrian",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/WorldSpeech/data/de_at/train-00368.arrow#473",
+    "caption": "[SPEECH]: <d>[German][Austrian] Das heißt, sie müssen einen Zweitjob annehmen und anderes tun. Damit erhöhen sie ihr Haushaltseinkommen, aber nicht weil Sie etwas getan haben, sondern weil das Leben wegen Ihrer Politik und der höheren Inflation nicht mehr bezahlbar ist.</d>",
+    "duration": 13.5
+  },
+  {
+    "domain": "speech",
+    "slot": 18,
+    "label": "ws es mexican",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/WorldSpeech/data/es_mx/train-00020.arrow#613",
+    "caption": "[SPEECH]: <d>[Spanish][Mexican] Esta Presidencia recibió en tiempo y forma solicitud de suscripción por parte de la diputada Adriana Espinosa y el diputado Pedro Haces. ¿Acepta la suscripción, diputado Fernando Zárate?</d>",
+    "duration": 13.81
+  },
+  {
+    "domain": "speech",
+    "slot": 19,
+    "label": "ws ar iraqi",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/WorldSpeech/data/ar_iq/train-00004.arrow#495",
+    "caption": "[SPEECH]: <d>[Arabic][Iraqi] ان فرص الاحتكار لقرارات المحكمه المستقبليه وتاثرها بالجهات السياسيه الممثله في هذه الرياسات المحدوده محتمل جدا وهو ما ينذر بتهديد جدي لاستقرار التجربه الديمقراطيه في العراق</d>",
+    "duration": 13.92
+  },
+  {
+    "domain": "speech",
+    "slot": 20,
+    "label": "ws ja",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/WorldSpeech/data/ja_jp/train-00178.arrow#125",
+    "caption": "[SPEECH]: <d>[Japanese][Japanese] この大綱の中で、地域経済、企業経営への影響も踏まえながら引き続き慎重に検討を行うとされたところですので、この方向に従って検討を続けていくことになる</d>",
+    "duration": 13.13
+  },
+  {
+    "domain": "speech",
+    "slot": 21,
+    "label": "ws ko",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/WorldSpeech/data/ko_kr/train-c13-00013.arrow#132",
+    "caption": "[SPEECH]: <d>[Korean][Korean] 무에대한감사감찰사건에대한평가까지다할수있다면결국국가수사위원회가모든것을다하는겁니다거기에정권과대통령이</d>",
+    "duration": 12.47
+  },
+  {
+    "domain": "speech",
+    "slot": 22,
+    "label": "ws ru",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/WorldSpeech/data/ru_ru/train-00334.arrow#64",
+    "caption": "[SPEECH]: <d>[Russian][Russian] При этом государственная регистрация представительства таможенной службы также осуществляется в соответствии с законодательством Российской Федерации.</d>",
+    "duration": 12.78
+  },
+  {
+    "domain": "speech",
+    "slot": 23,
+    "label": "ws zh taiwan question",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/WorldSpeech/data/zh_tw/train-00403.arrow#1365",
+    "caption": "[SPEECH]: <d>[Chinese][Taiwan] 我只想要請教部長，未來這部分要如何杜絕？如果你沒有辦法杜絕，甚至要用最新的DIU或者什麼樣更多的方式，你只是開愈多的</d>",
+    "duration": 12.37
+  },
+  {
+    "domain": "speech",
+    "slot": 24,
+    "label": "ws cantonese food safety",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/SPEECH/WorldSpeech/data/yue_hk/train-00387.arrow#165",
+    "caption": "[SPEECH]: <d>[Cantonese][Cantonese] 近年食品安全存有不少隱憂，例如進口食品驗出含不符合標準的添加劑或有害微生物、日本福島核廢水海鮮，還有台灣的萊豬製品都要關注。</d>",
+    "duration": 13.81
+  },
+  {
+    "domain": "speech",
+    "slot": 25,
+    "label": "cv en british",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-en/cv-corpus-26.0-2026-06-12/en/clips/common_voice_en_20292244.mp3",
+    "caption": "[SPEECH]: <d>[English][British][Female][Young] Croesus absolved Adrastus for his son's death; however, Adrastus later committed suicide.</d>",
+    "duration": 6.528
+  },
+  {
+    "domain": "speech",
+    "slot": 26,
+    "label": "cv de",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-de/cv-corpus-26.0-2026-06-12/de/clips/common_voice_de_22923248.mp3",
+    "caption": "[SPEECH]: <d>[German][German][Male][Young] Dies ist also ein Bereich, in dem wir uns eine gewisse Großzügigkeit erlauben können.</d>",
+    "duration": 6.086
+  },
+  {
+    "domain": "speech",
+    "slot": 27,
+    "label": "cv fr",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-fr/cv-corpus-26.0-2026-06-12/fr/clips/common_voice_fr_23907490.mp3",
+    "caption": "[SPEECH]: <d>[French][French][Male][Young] Comme son père Adrien de Gerlache, il a dirigé des expéditions polaires en Antarctique.</d>",
+    "duration": 6.36
+  },
+  {
+    "domain": "speech",
+    "slot": 28,
+    "label": "cv es mexican",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-es/cv-corpus-26.0-2026-06-12/es/clips/common_voice_es_34175528.mp3",
+    "caption": "[SPEECH]: <d>[Spanish][Mexican][Male][Young] Fue una ley especialmente pensada para imponer una reforma agraria.</d>",
+    "duration": 6.516
+  },
+  {
+    "domain": "speech",
+    "slot": 29,
+    "label": "cv it",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-it/cv-corpus-26.0-2026-06-12/it/clips/common_voice_it_22910132.mp3",
+    "caption": "[SPEECH]: <d>[Italian][Italian][Male][Adult] Le illusioni ottiche vengono anche usate nei film con la tecnica della prospettiva forzata.</d>",
+    "duration": 7.032
+  },
+  {
+    "domain": "speech",
+    "slot": 30,
+    "label": "cv pt brazilian",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-pt/cv-corpus-26.0-2026-06-12/pt/clips/common_voice_pt_27055225.mp3",
+    "caption": "[SPEECH]: <d>[Portuguese][Brazilian][Male][Adult] Função: estender o som, sem prejudicar as pessoas próximas.</d>",
+    "duration": 7.308
+  },
+  {
+    "domain": "speech",
+    "slot": 31,
+    "label": "cv ru",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-ru/cv-corpus-26.0-2026-06-12/ru/clips/common_voice_ru_18911217.mp3",
+    "caption": "[SPEECH]: <d>[Russian][Russian][Female][Young] Некоторые посреднические усилия были успешными, способствовали ослаблению напряженности и продвижению вперед мирных процессов.</d>",
+    "duration": 9.456
+  },
+  {
+    "domain": "speech",
+    "slot": 32,
+    "label": "cv ja",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-ja/cv-corpus-26.0-2026-06-12/ja/clips/common_voice_ja_26015726.mp3",
+    "caption": "[SPEECH]: <d>[Japanese][Japanese][Female][Adult] 最もよく知られているのは、コミュニケーション理論に関する公衆教育への彼の貢献です。</d>",
+    "duration": 7.596
+  },
+  {
+    "domain": "speech",
+    "slot": 33,
+    "label": "cv ko",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-ko/cv-corpus-26.0-2026-06-12/ko/clips/common_voice_ko_35891446.mp3",
+    "caption": "[SPEECH]: <d>[Korean][Korean][Male][Adult] 아이들은 문 밖에서 홀짝홀짝 울면서 가지를 않는다.</d>",
+    "duration": 7.56
+  },
+  {
+    "domain": "speech",
+    "slot": 34,
+    "label": "cv th",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-th/cv-corpus-26.0-2026-06-12/th/clips/common_voice_th_23654611.mp3",
+    "caption": "[SPEECH]: <d>[Thai][Thai][Female][Young] ฉันไม่สามารถบอกได้แน่ชัดแต่ฉันคิดว่าคุณถูก</d>",
+    "duration": 6.264
+  },
+  {
+    "domain": "speech",
+    "slot": 35,
+    "label": "cv ar msa",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-ar/cv-corpus-26.0-2026-06-12/ar/clips/common_voice_ar_24084093.mp3",
+    "caption": "[SPEECH]: <d>[Arabic][MSA][Female][Young] ثم بدأت الجاذبية في المناطق عالية الكثافة في جذب المادة حولها</d>",
+    "duration": 6.948
+  },
+  {
+    "domain": "speech",
+    "slot": 36,
+    "label": "cv zh mandarin",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-zh-CN/cv-corpus-26.0-2026-06-12/zh-CN/clips/common_voice_zh-CN_22146211.mp3",
+    "caption": "[SPEECH]: <d>[Chinese][Mandarin][Female][Young] 干扰调控这些基因的超级强化子会严重影响这些基因的表现。</d>",
+    "duration": 8.352
+  },
+  {
+    "domain": "speech",
+    "slot": 37,
+    "label": "cv cantonese",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-zh-HK/cv-corpus-26.0-2026-06-12/zh-HK/clips/common_voice_zh-HK_25369020.mp3",
+    "caption": "[SPEECH]: <d>[Cantonese][Cantonese][Female][Young] 聽日係假期，唔知道荃灣嘅汀九灣泳灘多唔多人？</d>",
+    "duration": 7.056
+  },
+  {
+    "domain": "speech",
+    "slot": 38,
+    "label": "cv minnan",
+    "audio": "/mnt/data04/480634/public/0_DATA/1_AUDIO/ASR/CommonVoice-26.0-nan-tw/cv-corpus-26.0-2026-06-12/nan-tw/clips/common_voice_nan-tw_40194447.mp3",
+    "caption": "[SPEECH]: <d>[Minnan][Taiwan][Male][Young] 舉頭三尺有神明</d>",
+    "duration": 3.132
+  }
+]

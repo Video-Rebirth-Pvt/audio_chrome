@@ -12,7 +12,8 @@ Checks:
   4. fingerprints: unchanged sources are skipped; weight edits are free, row-changing edits must rebuild
   5. holdout by path hash is stable when rows are added
   6. sampler: deterministic, exact resume, disjoint rank shards, token budget, weight shares
-  6b. max_records caps train rows; omitted weight mixes by kept row count
+  6b. max_records caps train rows; max_hours caps train clip hours (hash prefix, raising only adds rows);
+      omitted weight mixes by kept row count
   7. dataset: fixed lengths, padding, peak limit, channel folding, seeded window reads, caption dropout,
      bad files replaced and recorded
   8. VAE batch grouping keeps order and never pads
@@ -20,6 +21,9 @@ Checks:
   9b. val quota is source-balanced: a small budget still keeps every holdout source; prefix-cutting cannot drop the last one
   10. HF parquet with embedded audio: include glob, sidecar join (+ misaligned sidecar rejected), list keep,
       repack to Arrow (skip when current), refs decode to the same clip, stale repack rejected
+  11. migrate in place: dry run writes nothing, parquet deleted only when its sidecar matches, resumes;
+      sidecar as manifest + Arrow audio gives the same rows; misaligned sidecar / missing Arrow rejected;
+      null audio (metadata-only shards) is reported, keeps its parquet and is dropped as no_audio
 Exits 1 if any check fails.
 """
 
@@ -53,11 +57,14 @@ from chrome.data.index import (  # noqa: E402
     SourceSpec,
     build_source,
     check_index,
+    config_fingerprint,
     mixture_weight,
     source_specs,
 )
 from chrome.data.loader import (  # noqa: E402
     allocate_quota,
+    even_split,
+    holdout_rows,
     build_train_loader,
     build_val_loader,
     open_sources,
@@ -302,6 +309,30 @@ def check_max_records(cfg, tmp: Path) -> None:
     except RuntimeError:
         check("max_records change demands a rebuild", True)
 
+    full = build_source(next(s for s in source_specs(cfg) if s.name == "bulk"), cfg, workers=4, log=lambda *_: None)
+    picked = {}
+    for hours in (0.05, 0.1):
+        root = tmp / f"index_hours_{hours}"
+        limited = OmegaConf.merge(cfg, {"data": {"index_root": str(root)}})
+        limited.data.sources[2].max_hours = hours
+        meta = build_source(next(s for s in source_specs(limited) if s.name == "bulk"), limited, workers=4,
+                            log=lambda *_: None)
+        index = SourceIndex(root / "bulk")
+        train = ~index.holdout
+        picked[hours] = (set(index.keys()[train].tolist()), int(index.seconds[train].sum()), meta)
+    small, large = picked[0.05], picked[0.1]
+    check("max_hours caps train clip seconds", small[1] <= 0.05 * 3600 < small[1] + 20 and large[1] <= 0.1 * 3600
+          and small[2]["holdout_rows"] == full["holdout_rows"], seconds=(small[1], large[1]))
+    check("raising max_hours only adds rows", small[0] < large[0], rows=(len(small[0]), len(large[0])))
+    check("max_hours dropped rows are counted", small[2]["drops"].get("max_hours", 0) == full["train_rows"] - len(small[0]),
+          drops=small[2]["drops"].get("max_hours"))
+    try:
+        check_index(next(s for s in source_specs(cfg) if s.name == "bulk"), SourceIndex(tmp / "index_hours_0.05" / "bulk"),
+                    cfg, log=lambda *_: None)
+        check("max_hours change demands a rebuild", False)
+    except RuntimeError:
+        check("max_hours change demands a rebuild", True)
+
     equal = OmegaConf.merge(cfg, {})
     for source in equal.data.sources:
         source.weight = None
@@ -313,6 +344,33 @@ def check_max_records(cfg, tmp: Path) -> None:
         weights=[s.weight for s in streams],
         rows=[len(s.rows) for s in streams],
     )
+
+
+def check_min_seconds(cfg, corpus: dict, metas: dict, tmp: Path) -> None:
+    short = corpus["files"]["short"]
+    lowered = OmegaConf.merge(cfg, {"data": {"index_root": str(tmp / "index_min3")}})
+    lowered.data.sources[0].min_seconds = 3
+    meta = build_source(next(s for s in source_specs(lowered) if s.name == "speech"), lowered, workers=4,
+                        log=lambda *_: None)
+    index = SourceIndex(tmp / "index_min3" / "speech")
+    seconds = {index.row(i)[0]: int(index.seconds[i]) for i in range(len(index))}
+    check("source min_seconds keeps shorter clips", seconds.get(short) == 4 and "too_short" not in meta["drops"],
+          short=seconds.get(short), drops=meta["drops"])
+    try:
+        check_index(next(s for s in source_specs(lowered) if s.name == "speech"),
+                    SourceIndex(Path(cfg.data.index_root) / "speech"), lowered, log=lambda *_: None)
+        check("min_seconds change demands a rebuild", False)
+    except RuntimeError:
+        check("min_seconds change demands a rebuild", True)
+    pinned = OmegaConf.merge(cfg, {"audio": {"min_seconds": 3}})
+    pinned.data.sources[0].min_seconds = int(cfg.audio.min_seconds)
+    same = config_fingerprint(next(s for s in source_specs(pinned) if s.name == "speech"), pinned)
+    check("source pinned to the old minimum keeps its fingerprint", same == metas["speech"]["config_fingerprint"])
+    try:
+        SourceSpec.from_config({"name": "n", "paths": ["/x"], "min_seconds": 0}, {})
+        check("min_seconds < 1 is rejected", False)
+    except ValueError:
+        check("min_seconds < 1 is rejected", True)
 
 
 def check_dataset(cfg, corpus: dict) -> None:
@@ -387,6 +445,41 @@ def check_val_quota(cfg, specs, indexes) -> None:
     check("allocate_quota budget 0 keeps all", allocate_quota(sizes, 0) == sizes)
 
 
+def check_val_groups() -> None:
+    from chrome.train.trainer import metric_keys, top_metrics
+
+    class Holdout:
+        def __init__(self, keys, held):
+            self._keys, self.holdout = np.asarray(keys, np.uint64), np.asarray(held, bool)
+
+        def keys(self):
+            return self._keys
+
+    rng = np.random.default_rng(0)
+    def index(n_rows, n_held):
+        keys = rng.permutation(10_000)[:n_rows].astype(np.uint64)
+        return Holdout(keys, np.arange(n_rows) < n_held)
+    specs = [SourceSpec(name="solo", paths=("/x",), task="sfx"),
+             SourceSpec(name="small", paths=("/x",), task="t1", group="g"),
+             SourceSpec(name="big_a", paths=("/x",), task="t2", group="g"),
+             SourceSpec(name="big_b", paths=("/x",), task="t2", group="g")]
+    indexes = [index(30, 10), index(30, 3), index(60, 20), index(60, 20)]
+    rows = holdout_rows(specs, indexes, 8)
+    solo = np.flatnonzero(indexes[0].holdout)
+    check("ungrouped source: smallest hashes, as before",
+          rows[0].tolist() == solo[np.argsort(indexes[0].keys()[solo])][:8].tolist())
+    t2 = sorted((int(indexes[i].keys()[r]), i, int(r)) for i in (2, 3) for r in np.flatnonzero(indexes[i].holdout))[:5]
+    got_t2 = sorted((int(indexes[i].keys()[r]), i, int(r)) for i in (2, 3) for r in rows[i])
+    check("group shares per_source evenly over tasks, spare to the rest",
+          len(rows[1]) == 3 and got_t2 == t2, sizes=[len(r) for r in rows])
+    check("even_split", even_split([3, 40, 40], 30) == [3, 14, 13] and even_split([5, 5], 30) == [5, 5]
+          and even_split([0, 9], 4) == [0, 4], got=even_split([3, 40, 40], 30))
+    names = list(dict.fromkeys(s.metric for s in specs))
+    check("group metrics roll up", names == ["solo", "g/t1", "g/t2"] and metric_keys("g/t1") == ("g/t1", "g")
+          and top_metrics(names) == ["solo", "g"], names=names)
+    check("group is not in the fingerprint", specs[1].content() == SourceSpec(name="small", paths=("/x",)).content())
+
+
 def check_loader(cfg) -> None:
     loader, sampler = build_train_loader(cfg, log=lambda *_: None)
     batches = []
@@ -410,33 +503,46 @@ def check_loader(cfg) -> None:
     check_val_quota(cfg, specs, indexes)
 
 
+SHARD_ROWS = {
+    "train-00000": ([5.0, 6.5, 3.0, 8.05], ["clean", "high", "medium", "clean"]),
+    "train-00001": ([7.0, 4.4], ["medium", "clean"]),
+    "test-00000": ([5.0], ["clean"]),
+}
+KEPT_SEGMENTS = {"train-00000_seg0", "train-00000_seg3", "train-00001_seg0", "train-00001_seg1"}
+
+
+def _clip(seconds: float, rate: int, fmt: str) -> bytes:
+    buffer = io.BytesIO()
+    t = np.arange(int(seconds * rate)) / rate
+    sf.write(buffer, (0.3 * np.sin(2 * np.pi * 330 * t)).astype(np.float32), rate, format=fmt)
+    return buffer.getvalue()
+
+
+def _write_hf_shards(shards: Path, sidecars: Path, full_sidecar: bool = False) -> dict[str, list[bytes]]:
+    """HF-style shards (audio struct, row groups of 3) and their sidecars; returns the clip bytes per shard."""
+    shards.mkdir(parents=True)
+    sidecars.mkdir(parents=True)
+    clips = {}
+    for stem, (durations, levels) in SHARD_ROWS.items():
+        ids = [f"{stem}_seg{i}" for i in range(len(durations))]
+        clips[stem] = [_clip(d, 24000, "OGG" if i % 2 else "FLAC") for i, d in enumerate(durations)]
+        audio = [{"bytes": b, "path": f"{s}.opus"} for b, s in zip(clips[stem], ids)]
+        table = pa.table({"audio": audio, "duration": durations, "segment_id": ids, "cer": [0.0] * len(ids)})
+        pq.write_table(table, shards / f"{stem}.parquet", row_group_size=3)
+        side = {"row_index": list(range(len(ids))), "segment_id": ids, "qa_risk_level": levels,
+                "resp": [f"[SPEECH]: <d>[Test] {s}</d>" for s in ids]}
+        if full_sidecar:
+            side.update(duration=durations, cer=[0.0] * len(ids), audio_path=[f"{s}.opus" for s in ids])
+        pq.write_table(pa.table(side), sidecars / f"{stem}.parquet", row_group_size=3)
+    return clips
+
+
 def check_embedded(base_cfg, tmp: Path) -> None:
     from chrome.data.audio_io import read_audio
     from chrome.data.blobs import blob_path, parse_blob_ref, repack
 
     shards, sidecars = tmp / "hf" / "xx_yy", tmp / "sidecar" / "xx_yy"
-    shards.mkdir(parents=True)
-    sidecars.mkdir(parents=True)
-
-    def clip(seconds: float, rate: int, fmt: str) -> bytes:
-        buffer = io.BytesIO()
-        t = np.arange(int(seconds * rate)) / rate
-        sf.write(buffer, (0.3 * np.sin(2 * np.pi * 330 * t)).astype(np.float32), rate, format=fmt)
-        return buffer.getvalue()
-
-    shard_rows = {
-        "train-00000": ([5.0, 6.5, 3.0, 8.05], ["clean", "high", "medium", "clean"]),
-        "train-00001": ([7.0, 4.4], ["medium", "clean"]),
-        "test-00000": ([5.0], ["clean"]),
-    }
-    for stem, (durations, levels) in shard_rows.items():
-        ids = [f"{stem}_seg{i}" for i in range(len(durations))]
-        audio = [{"bytes": clip(d, 24000, "OGG" if i % 2 else "FLAC"), "path": f"{s}.opus"}
-                 for i, (d, s) in enumerate(zip(durations, ids))]
-        table = pa.table({"audio": audio, "duration": durations, "segment_id": ids, "cer": [0.0] * len(ids)})
-        pq.write_table(table, shards / f"{stem}.parquet", row_group_size=3)
-        pq.write_table(pa.table({"row_index": list(range(len(ids))), "segment_id": ids, "qa_risk_level": levels,
-                                 "resp": [f"[SPEECH]: <d>[Test] {s}</d>" for s in ids]}), sidecars / f"{stem}.parquet")
+    _write_hf_shards(shards, sidecars)
 
     cfg = OmegaConf.merge(base_cfg, {"data": {"index_root": str(tmp / "index_hf")}})
     cfg.data.sources = [{"name": "hf", "task": "speech", "holdout_ppm": 0, "include": "train-*.parquet",
@@ -459,8 +565,7 @@ def check_embedded(base_cfg, tmp: Path) -> None:
     meta = build_source(spec, cfg, workers=2, log=lambda *_: None)
     index = SourceIndex(Path(cfg.data.index_root) / "hf")
     rows = {index.row(i)[1].split("] ")[-1][:-4]: index.row(i)[0] for i in range(len(index))}
-    want = {"train-00000_seg0", "train-00000_seg3", "train-00001_seg0", "train-00001_seg1"}
-    check("include + sidecar join + list keep", set(rows) == want
+    check("include + sidecar join + list keep", set(rows) == KEPT_SEGMENTS
           and meta["drops"].get("keep_filter") == 1 and meta["drops"].get("too_short") == 1,
           kept=sorted(rows), drops=meta["drops"])
     file, row = parse_blob_ref(rows["train-00000_seg3"])
@@ -495,6 +600,96 @@ def check_embedded(base_cfg, tmp: Path) -> None:
         check("stale repack is rejected", True)
 
 
+def check_migrated(base_cfg, tmp: Path) -> None:
+    from chrome.data.audio_io import read_audio
+    from chrome.data.blobs import parse_blob_ref
+    from chrome.data.cli import cmd_migrate
+
+    root, side_root = tmp / "ws" / "data", tmp / "ws" / "qa_sidecar"
+    shards, sidecars = root / "xx_yy", side_root / "xx_yy"
+    clips = _write_hf_shards(shards, sidecars, full_sidecar=True)
+    # Metadata-only shard (HF writes a null audio struct) and a shard with one null clip.
+    holder = pa.struct([("bytes", pa.binary()), ("path", pa.string())])
+    for stem, payload in {"train-00002": [None, None], "train-00003": [_clip(6.0, 24000, "FLAC"), None]}.items():
+        ids = [f"{stem}_seg{i}" for i in range(len(payload))]
+        audio = pa.array([None if b is None else {"bytes": b, "path": f"{s}.opus"} for b, s in zip(payload, ids)], holder)
+        common = {"duration": [6.0, 7.0], "segment_id": ids, "cer": [0.0, 0.0]}
+        pq.write_table(pa.table({"audio": audio, **common}), shards / f"{stem}.parquet")
+        pq.write_table(pa.table({"row_index": [0, 1], **common, "qa_risk_level": ["clean", "clean"],
+                                 "audio_path": [f"{s}.opus" for s in ids],
+                                 "resp": [f"[SPEECH]: <d>[Test] {s}</d>" for s in ids]}), sidecars / f"{stem}.parquet")
+        clips[stem] = payload
+    settings = {"root": str(root), "sidecar": str(side_root), "locales": None, "include": "*.parquet", "workers": 2,
+                "delete": False, "dry_run": True, "force": False, "report": str(tmp / "ws" / "migrate.jsonl")}
+
+    def run(**changes) -> int:
+        return cmd_migrate(OmegaConf.create({"migrate": {**settings, **changes}}))
+
+    code = run()
+    check("migrate dry run writes nothing", code == 0 and not list(shards.glob("*.arrow"))
+          and len(list(shards.glob("*.parquet"))) == 5)
+
+    good = pq.read_table(sidecars / "train-00001.parquet")
+    bad = good.to_pydict()
+    bad["segment_id"] = bad["segment_id"][::-1]
+    pq.write_table(pa.table(bad), sidecars / "train-00001.parquet")
+    code = run(dry_run=False, delete=True)
+    left = sorted(p.name for p in shards.glob("*.parquet"))
+    check("migrate deletes only shards whose sidecar matches and that have audio",
+          code == 1 and left == ["train-00001.parquet", "train-00002.parquet"]
+          and len(list(shards.glob("*.arrow"))) == 5, left=left)
+    pq.write_table(good, sidecars / "train-00001.parquet")
+    code = run(dry_run=False, delete=True)
+    again = run(dry_run=False, delete=True)
+    left = sorted(p.name for p in shards.glob("*.parquet"))
+    check("migrate resumes; only the shard without audio keeps its parquet",
+          code == 0 and again == 0 and left == ["train-00002.parquet"], left=left)
+    reports = [json.loads(line) for line in Path(settings["report"]).read_text().splitlines()]
+    flagged = {Path(r["file"]).stem: (r["no_audio"], r["null_rows"]) for r in reports}
+    check("migrate reports null audio", flagged.get("train-00002") == (True, 2) and flagged.get("train-00003") == (False, 1),
+          flagged={k: v for k, v in flagged.items() if k in ("train-00002", "train-00003")})
+
+    same = True
+    for stem, want in clips.items():
+        table = pa.ipc.open_file(pa.memory_map(str(shards / f"{stem}.arrow"))).read_all()
+        same &= table["audio"].to_pylist() == want
+        same &= table["segment_id"].to_pylist() == [f"{stem}_seg{i}" for i in range(len(want))]
+    check("migrated Arrow = parquet bytes + segment_id", same)
+
+    cfg = OmegaConf.merge(base_cfg, {"data": {"index_root": str(tmp / "index_ws")}})
+    cfg.data.sources = [{"name": "ws", "task": "speech", "holdout_ppm": 0, "include": "train-*.parquet",
+                         "blobs": str(root), "columns": {"audio": "audio", "caption": "resp", "duration": "duration"},
+                         "keep": {"qa_risk_level": ["clean", "medium"]}, "paths": [str(sidecars)]}]
+    spec = source_specs(cfg)[0]
+    meta = build_source(spec, cfg, workers=2, log=lambda *_: None)
+    index = SourceIndex(Path(cfg.data.index_root) / "ws")
+    rows = {index.row(i)[1].split("] ")[-1][:-4]: index.row(i)[0] for i in range(len(index))}
+    file, row = parse_blob_ref(rows["train-00000_seg3"])
+    check("sidecar manifest + Arrow audio: same rows as the parquet source, null clips dropped",
+          set(rows) == KEPT_SEGMENTS | {"train-00003_seg0"}
+          and file == str(shards / "train-00000.arrow") and row == 3 and meta["drops"].get("no_audio") == 3
+          and meta["drops"].get("keep_filter") == 1 and meta["drops"].get("too_short") == 1,
+          kept=sorted(rows), drops=meta["drops"])
+    wave, rate = read_audio(rows["train-00001_seg1"])
+    check("migrated ref decodes to the clip", rate == 24000 and abs(wave.shape[-1] / rate - 4.4) < 0.05,
+          seconds=round(wave.shape[-1] / rate, 3))
+    check("Arrow files are part of the manifest stamps", any(s[0].endswith("train-00000.arrow") for s in spec.stamps()))
+
+    pq.write_table(pa.table(bad), sidecars / "train-00001.parquet")
+    try:
+        build_source(spec, cfg, workers=2, force=True, log=lambda *_: None)
+        check("sidecar out of step with its Arrow file is rejected", False)
+    except ValueError:
+        check("sidecar out of step with its Arrow file is rejected", True)
+    pq.write_table(good, sidecars / "train-00001.parquet")
+    (shards / "train-00001.arrow").rename(shards / "train-00001.arrow.bak")
+    try:
+        build_source(spec, cfg, workers=2, force=True, log=lambda *_: None)
+        check("missing Arrow file is rejected", False)
+    except FileNotFoundError:
+        check("missing Arrow file is rejected", True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--keep", action="store_true", help="keep the temp dir")
@@ -510,10 +705,13 @@ def main() -> int:
         check_holdout(cfg, corpus, tmp)
         check_sampler(cfg)
         check_max_records(cfg, tmp)
+        check_min_seconds(cfg, corpus, metas, tmp)
         check_dataset(cfg, corpus)
         check_grouping()
+        check_val_groups()
         check_loader(cfg)
         check_embedded(cfg, tmp)
+        check_migrated(cfg, tmp)
     finally:
         if args.keep:
             print(f"kept {tmp}")

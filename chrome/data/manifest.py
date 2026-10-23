@@ -4,6 +4,10 @@ Parquet with the audio embedded as bytes (HF ``datasets``) reads every column ex
 field of each row becomes a ref into the repacked Arrow file (``chrome/data/blobs.py``). A sidecar parquet
 with the same row order (``<sidecar>/<parent dir>/<file name>``) adds or overrides columns, e.g. captions
 and QA scores produced after the download.
+
+A parquet without audio bytes in a source with ``blobs`` (a sidecar whose shard was migrated) is the
+manifest itself: row i gets ``audio = <blobs>/<parent dir>/<stem>.arrow#i``, checked by row count and
+``segment_id``. Rows whose blob audio is null get no audio field and are dropped as ``no_audio``.
 """
 
 from __future__ import annotations
@@ -15,8 +19,18 @@ from pathlib import Path
 
 import orjson
 
-from chrome.data.blobs import blob_path, blob_ref, check_blob, embedded_audio_column
+from chrome.data.blobs import (
+    KEY_COLUMNS,
+    blob_path,
+    blob_ref,
+    check_blob,
+    check_blob_rows,
+    embedded_audio_column,
+    null_audio_rows,
+)
 
+# Field that receives the blob ref when the manifest itself holds no audio.
+BLOB_AUDIO_KEY = "audio"
 AUDIO_KEYS = ("path", "audio", "audio_filepath", "wav")
 CAPTION_KEYS = ("resp", "caption", "normalized_text", "text")
 DURATION_KEYS = ("duration", "audio_duration")
@@ -93,7 +107,8 @@ def row_kept(row: Mapping, keep: Mapping) -> bool:
 class Chunk:
     """JSONL: rows whose first byte lies in [start, stop). Parquet: row groups [start, stop).
 
-    ``sidecar``: parquet joined row by row. ``blob``: repacked audio of a parquet with embedded bytes.
+    ``sidecar``: parquet joined row by row. ``blob``: repacked audio of a parquet with embedded bytes, or the
+    audio of a parquet manifest without any.
     """
 
     path: str
@@ -138,11 +153,9 @@ def plan_chunks(
 
                 handle = pq.ParquetFile(file)
                 side = str(sidecar_path(sidecar, file)) if sidecar else None
-                blob = None
-                if embedded_audio_column(handle.schema_arrow) is not None:
-                    if not blobs:
-                        raise ValueError(f"{file} embeds audio bytes; set the source's `blobs` dir and repack it")
-                    blob = str(blob_path(blobs, file))
+                if embedded_audio_column(handle.schema_arrow) is not None and not blobs:
+                    raise ValueError(f"{file} embeds audio bytes; set the source's `blobs` dir and repack it")
+                blob = str(blob_path(blobs, file)) if blobs else None
                 chunks += [
                     Chunk(str(file), "parquet", g, g + 1, side, blob) for g in range(handle.num_row_groups)
                 ]
@@ -179,10 +192,16 @@ def _parquet_rows(chunk: Chunk) -> Iterator[dict]:
     audio = embedded_audio_column(handle.schema_arrow)
     columns = None if audio is None else [n for n in handle.schema_arrow.names if n != audio]
     rows = handle.read_row_groups(list(range(chunk.start, chunk.stop)), columns=columns).to_pylist()
-    if audio is not None:
-        check_blob(chunk.path, chunk.blob, meta.num_rows)
+    if audio is not None or chunk.blob:
+        if audio is not None:
+            check_blob(chunk.path, chunk.blob, meta.num_rows)
+        else:
+            keys = {k: [row.get(k) for row in rows] for k in KEY_COLUMNS if k in handle.schema_arrow.names}
+            check_blob_rows(chunk.blob, meta.num_rows, first, keys)
+        empty = set(null_audio_rows(chunk.blob, first, len(rows)))
+        key = audio if audio is not None else BLOB_AUDIO_KEY
         for i, row in enumerate(rows):
-            row[audio] = blob_ref(chunk.blob, first + i)
+            row[key] = None if i in empty else blob_ref(chunk.blob, first + i)
     if chunk.sidecar:
         for i, (row, extra) in enumerate(zip(rows, _sidecar_rows(chunk, first, len(rows)))):
             index = extra.get("row_index")
@@ -222,12 +241,21 @@ def iter_rows(chunk: Chunk) -> Iterator[dict | None]:
             yield row if isinstance(row, dict) else None
 
 
-def manifest_stamp(paths, include: str | None = None, sidecar: str | None = None) -> list[tuple[str, int, int]]:
-    """(file, size, mtime_ns) per manifest file and its sidecar; part of the index fingerprint."""
+def manifest_stamp(
+    paths, include: str | None = None, sidecar: str | None = None, blobs: str | None = None
+) -> list[tuple[str, int, int]]:
+    """(file, size, mtime_ns) per manifest file, its sidecar and its blob; part of the index fingerprint.
+
+    A blob not written yet is left out; the build then fails on it, and the stamps change once it exists.
+    """
     stamps = []
     for path in paths:
         for file in manifest_files(path, include):
-            for part in (file, sidecar_path(sidecar, file) if sidecar else None):
+            parts = [file, sidecar_path(sidecar, file) if sidecar else None]
+            if blobs and file.suffix == ".parquet":
+                blob = blob_path(blobs, file)
+                parts.append(blob if blob.is_file() else None)
+            for part in parts:
                 if part is None:
                     continue
                 stat = part.stat()

@@ -53,8 +53,11 @@ train:
     # shard_size: null
     # reshard_after_forward: true      # false keeps gathered block weights until backward (more memory)
     # sync_every_micro: true           # false: one gradient reduce per step (full-size grads in memory)
-  # Seconds before a collective times out (one rank loading Qwen on a cache miss, big checkpoint writes).
+  # Minutes before a collective times out (one rank loading Qwen on a cache miss). Checkpoint disk I/O
+  # does not sit on NCCL; see ckpt_timeout_minutes.
   dist_timeout_minutes: 30
+  # Minutes non-rank-0 ranks poll for rank-0's snapshot / trainer.pt (JuiceFS 10B write can exceed 30 min).
+  ckpt_timeout_minutes: 120
   seed: 1234
   max_steps: 100000
   grad_accum: 1

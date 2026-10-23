@@ -81,7 +81,9 @@ class T2ATask(Task):
         self.sigma_sampler = build_timestep_sampler(cfg["flow"])
         self.reduction = str(cfg["flow"]["loss_reduction"])
         self.max_tokens = int(cfg["data"]["loader"]["max_tokens"])
-        self.group_names = [s.name for s in source_specs(cfg)]
+        specs = source_specs(cfg)
+        self.group_names = list(dict.fromkeys(s.metric for s in specs))
+        self._metric_of = torch.tensor([self.group_names.index(s.metric) for s in specs])
         self._train = None
 
     # ------------------------------------------------------------ model
@@ -142,7 +144,7 @@ class T2ATask(Task):
     def loss(self, model, inputs: T2AInputs, generators: Generators) -> LossOutput:
         sigma = self.sigma_sampler.sample(inputs.seq.num_samples, generator=generators.cpu)
         loss, per_sample = t2a_flow_loss(model, inputs, sigma, generators.device, self.reduction)
-        return LossOutput(loss, per_sample, inputs.sources)
+        return LossOutput(loss, per_sample, self._metric_of[inputs.sources.cpu()])
 
     # ------------------------------------------------------------ preview
 

@@ -74,6 +74,9 @@ class SourceSpec:
     name: str
     paths: tuple[str, ...]
     task: str = "misc"
+    # Sources sharing a group count as one for validation (data.val.per_source clips, split evenly over
+    # their tasks) and log loss as <group>/<task> plus <group>. None: the source is its own group.
+    group: str | None = None
     # None: loader mixes this source in proportion to its train rows (after max_records).
     weight: float | None = None
     columns: Columns = field(default_factory=Columns)
@@ -82,12 +85,17 @@ class SourceSpec:
     long: str = "drop"
     caption_prefix: str = ""
     max_records: int | None = None
+    # Train rows up to this many hours of clips (the `seconds` column, as inspect reports), in hash order.
+    max_hours: float | None = None
+    # Shortest clip in seconds for this source; None: audio.min_seconds.
+    min_seconds: int | None = None
     holdout_ppm: int = 500
     # Glob on manifest file names inside a directory path, e.g. "train-*.parquet".
     include: str | None = None
     # Parquet joined row by row: <sidecar>/<parent dir of the manifest>/<manifest file name>.
     sidecar: str | None = None
-    # Repacked embedded audio: <blobs>/<parent dir>/<stem>.arrow (scripts/data/repack_audio.sh).
+    # Audio as Arrow: <blobs>/<parent dir>/<stem>.arrow, repacked from embedded parquet audio
+    # (scripts/data/repack_audio.sh) or migrated next to the shard (scripts/data/migrate_audio.sh).
     blobs: str | None = None
 
     @classmethod
@@ -100,6 +108,7 @@ class SourceSpec:
             name=str(merged["name"]),
             paths=tuple(str(p) for p in paths),
             task=str(merged.get("task", "misc")),
+            group=_optional_str(merged.get("group")),
             weight=_optional_float(merged.get("weight")),
             columns=Columns.from_config(merged.get("columns")),
             keep=merged.get("keep") or {},
@@ -107,6 +116,8 @@ class SourceSpec:
             long=str(merged.get("long", "drop")),
             caption_prefix=str(merged.get("caption_prefix") or ""),
             max_records=None if merged.get("max_records") in (None, "") else int(merged["max_records"]),
+            max_hours=_optional_float(merged.get("max_hours")),
+            min_seconds=None if merged.get("min_seconds") in (None, "") else int(merged["min_seconds"]),
             holdout_ppm=int(merged.get("holdout_ppm", 500)),
             include=_optional_str(merged.get("include")),
             sidecar=_optional_str(merged.get("sidecar")),
@@ -118,21 +129,36 @@ class SourceSpec:
             raise ValueError(f"{spec.name}: weight must be >= 0")
         if spec.max_records is not None and spec.max_records < 0:
             raise ValueError(f"{spec.name}: max_records must be >= 0")
+        if spec.max_hours is not None and spec.max_hours < 0:
+            raise ValueError(f"{spec.name}: max_hours must be >= 0")
+        if spec.min_seconds is not None and spec.min_seconds < 1:
+            raise ValueError(f"{spec.name}: min_seconds must be >= 1")
         return spec
 
     def content(self) -> dict:
-        """Fields that change the index contents (weight and task do not)."""
+        """Fields that change the index contents (weight, task, group do not; min_seconds goes in via the policy)."""
         data = asdict(self)
         data.pop("weight")
         data.pop("task")
-        for key in ("include", "sidecar", "blobs"):
+        data.pop("group")
+        data.pop("min_seconds")
+        for key in ("include", "sidecar", "blobs", "max_hours"):
             if data[key] is None:
                 # Indexes built before these keys existed keep their fingerprint.
                 data.pop(key)
         return data
 
     def stamps(self) -> list[tuple[str, int, int]]:
-        return manifest_stamp(self.paths, self.include, self.sidecar)
+        return manifest_stamp(self.paths, self.include, self.sidecar, self.blobs)
+
+    @property
+    def val_group(self) -> str:
+        return self.group or self.name
+
+    @property
+    def metric(self) -> str:
+        """Loss metric name: the source name, or <group>/<task> inside a group."""
+        return self.name if self.group is None else f"{self.group}/{self.task}"
 
 
 def _optional_float(value) -> float | None:
@@ -169,9 +195,15 @@ def source_specs(cfg) -> list[SourceSpec]:
     return specs
 
 
-def length_policy(cfg) -> LengthPolicy:
+def length_policy(cfg, spec: SourceSpec | None = None) -> LengthPolicy:
+    """The run's policy, with ``spec.min_seconds`` in place of ``audio.min_seconds`` when the source sets it."""
     audio, data = cfg["audio"], cfg["data"]
-    return LengthPolicy(int(audio["min_seconds"]), int(audio["max_seconds"]), float(data["slack_seconds"]))
+    lo, hi = int(audio["min_seconds"]), int(audio["max_seconds"])
+    if spec is not None and spec.min_seconds is not None:
+        lo = spec.min_seconds
+        if lo > hi:
+            raise ValueError(f"{spec.name}: min_seconds {lo} > audio.max_seconds {hi}")
+    return LengthPolicy(lo, hi, float(data["slack_seconds"]))
 
 
 def path_key(path: str) -> int:
@@ -202,7 +234,7 @@ def config_fingerprint(spec: SourceSpec, cfg) -> str:
     payload = {
         "version": INDEX_VERSION,
         "source": spec.content(),
-        "policy": asdict(length_policy(cfg)),
+        "policy": asdict(length_policy(cfg, spec)),
         "max_text_tokens": int(data["max_text_tokens"]),
         "tokenizer": str(data["tokenizer"]),
         "exclude": sorted(_paths_from(data.get("exclude"))),
@@ -269,12 +301,12 @@ def _scan_chunk(job: dict) -> dict:
         if row is None:
             drops["bad_json"] += 1
             continue
-        if spec.keep and not row_kept(row, spec.keep):
-            drops["keep_filter"] += 1
-            continue
         path = first_value(row, spec.columns.audio)
         if not path:
             drops["no_audio"] += 1
+            continue
+        if spec.keep and not row_kept(row, spec.keep):
+            drops["keep_filter"] += 1
             continue
         path = str(path)
         caption = str(first_value(row, spec.columns.caption) or "").strip()
@@ -376,7 +408,7 @@ def build_source(spec: SourceSpec, cfg, workers: int, force: bool = False, log=p
     tmp = out / f".tmp-{os.getpid()}"
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
-    policy = length_policy(cfg)
+    policy = length_policy(cfg, spec)
     jobs = [
         {
             "spec": spec,
@@ -419,14 +451,22 @@ def build_source(spec: SourceSpec, cfg, workers: int, force: bool = False, log=p
             keys = table["key"].to_numpy()
         holdout = (keys % HOLDOUT_SCALE) < spec.holdout_ppm
         train = ~holdout
-        if spec.max_records is not None and train.sum() > spec.max_records:
-            # Hash order is a fixed random order, so the cap is stable across rebuilds.
-            rows = np.flatnonzero(train)
-            chosen = rows[np.argpartition(keys[rows], spec.max_records)[: spec.max_records]]
-            drops["max_records"] += int(rows.size - chosen.size)
-            selected = np.zeros(table.num_rows, bool)
-            selected[chosen] = True
-            selected |= holdout
+        # Hash order is a fixed random order, so both caps are stable across rebuilds, and raising one only
+        # adds rows.
+        rows = np.flatnonzero(train)
+        rows = rows[np.argsort(keys[rows], kind="stable")]
+        cut = rows.size
+        if spec.max_records is not None and cut > spec.max_records:
+            drops["max_records"] += cut - spec.max_records
+            cut = spec.max_records
+        if spec.max_hours is not None:
+            within = int(np.searchsorted(np.cumsum(table["seconds"].to_numpy()[rows[:cut]]), spec.max_hours * 3600,
+                                         side="right"))
+            drops["max_hours"] += cut - within
+            cut = within
+        if cut < rows.size:
+            selected = holdout.copy()
+            selected[rows[:cut]] = True
             table = table.filter(pa.array(selected))
             holdout = holdout[selected]
             train = ~holdout

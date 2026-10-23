@@ -30,6 +30,15 @@ from chrome.train.parallel import EMA, build_parallel
 from chrome.train.tensorboard import TensorBoardLogger
 
 
+def metric_keys(name: str) -> tuple[str, ...]:
+    """A ``<group>/<task>`` loss also counts toward ``<group>``."""
+    return (name, name.split("/", 1)[0]) if "/" in name else (name,)
+
+
+def top_metrics(names: list[str]) -> list[str]:
+    return list(dict.fromkeys(n.split("/", 1)[0] for n in names))
+
+
 class Meter:
     """Sums and counts per metric; ``means`` averages them over every rank (collective when distributed)."""
 
@@ -105,6 +114,10 @@ class Trainer:
             OmegaConf.save(cfg, self.run_dir / "config.yaml")
         barrier(self.env)
         self._log_file = (self.run_dir / "log.jsonl").open("a") if self.env.is_main else None
+        if self.env.is_main:
+            dropped = ckpt.drop_incomplete(self.run_dir)
+            if dropped:
+                self.log(f"[ckpt] dropped incomplete {', '.join(p.name for p in dropped)}")
         self._tb = TensorBoardLogger(
             self.run_dir,
             enabled=self.env.is_main and bool(t.get("tensorboard", True)),
@@ -263,7 +276,8 @@ class Trainer:
                 meter.add("samples", prepared.num_samples)
                 meter.add("fill", prepared.fill)
                 for value, group in zip(out.per_sample.tolist(), out.groups.tolist()):
-                    meter.add(f"loss/{self.task.group_names[group]}", value)
+                    for key in metric_keys(self.task.group_names[group]):
+                        meter.add(f"loss/{key}", value)
                 last_batch = batch["batch_id"]
                 self._last_inputs = prepared.inputs
 
@@ -312,7 +326,9 @@ class Trainer:
         if self.device.type == "cuda":
             record["mem_gb"] = round(torch.cuda.max_memory_allocated(self.device) / 2**30, 1)
         self._record(record)
-        groups = " ".join(f"{n}={stats[f'loss/{n}']:.3f}" for n in self.task.group_names if f"loss/{n}" in stats)
+        groups = " ".join(
+            f"{n}={stats[f'loss/{n}']:.3f}" for n in top_metrics(self.task.group_names) if f"loss/{n}" in stats
+        )
         stages = " ".join(
             f"{k[:-2]} {v:.2f}" for k, v in stats.items() if k.endswith("_s") and k not in ("data_s", "cond_s", "model_s")
         )
@@ -359,13 +375,19 @@ class Trainer:
         self.parallel.reshard(self.model)
         self.model.train()
         result = {"event": "val", "step": self.step, "loss": (totals[0] / totals[1].clamp(min=1)).item()}
+        sums: dict[str, float] = defaultdict(float)
+        counts: dict[str, float] = defaultdict(float)
         for i, name in enumerate(names):
-            if totals[2 + len(names) + i] > 0:
-                result[f"loss/{name}"] = (totals[2 + i] / totals[2 + len(names) + i]).item()
+            for key in metric_keys(name):
+                sums[key] += totals[2 + i].item()
+                counts[key] += totals[2 + len(names) + i].item()
+        for key in sums:
+            if counts[key] > 0:
+                result[f"loss/{key}"] = sums[key] / counts[key]
         self._record(result)
         self.log(
             f"[val] step {self.step} loss {result['loss']:.4f} ({int(totals[1].item())} clips) | "
-            + " ".join(f"{n}={result[f'loss/{n}']:.3f}" for n in names if f"loss/{n}" in result)
+            + " ".join(f"{n}={result[f'loss/{n}']:.3f}" for n in top_metrics(names) if f"loss/{n}" in result)
         )
         return result
 
@@ -397,20 +419,25 @@ class Trainer:
     def save(self) -> None:
         path = ckpt.step_dir(self.run_dir, self.step)
         started = time.perf_counter()
+        wait_min = float(self.t.get("ckpt_timeout_minutes") or max(120.0, float(self.t.get("dist_timeout_minutes", 30)) * 4))
         if self.env.is_main:
+            dropped = ckpt.drop_incomplete(self.run_dir)
+            if dropped:
+                self.log(f"[ckpt] dropped incomplete {', '.join(p.name for p in dropped)}")
             path.mkdir(parents=True, exist_ok=True)
         barrier(self.env)
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
         sharded = bool(self.t.get("save_sharded", True))
         if sharded:
             ckpt.save_state(path, self.model, self.optimizer, self.ema)
         else:
-            ckpt.save_full(path, self.model, self.optimizer, self.ema)
+            ckpt.save_full(path, self.model, self.optimizer, self.ema, log=self.log, wait_minutes=wait_min)
         if self.data_state is not None:
             ckpt.save_data_state(path, self.env.rank, self.data_state)
         export = str(self.t.get("export") or "none")
         if sharded and export != "none":
             self._export(path, export)
-        barrier(self.env)
         if self.env.is_main:
             torch.save(
                 {
@@ -423,6 +450,9 @@ class Trainer:
                 path / ckpt.TRAINER,
             )
             ckpt.write_latest(self.run_dir, self.step, int(self.t["keep_ckpts"]))
+            (path / ckpt.SAVE_DONE).write_text("ok\n")
+        else:
+            ckpt.wait_for_file(path / ckpt.SAVE_DONE, wait_min)
         barrier(self.env)
         self.log(f"[ckpt] step {self.step} → {path} ({time.perf_counter() - started:.0f}s)")
 
