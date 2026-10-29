@@ -8,9 +8,10 @@ source epoch, and a small source simply wraps into its next epoch more often.
 
 Batches are lists of ``(batch_id, source, row, sample_seed)``. A batch closes when the next sample would
 push ``sum(cost)`` past ``max_tokens`` (cost = DiT audio rows + caption tokens); that sample opens the
-next batch, so nothing is dropped. The sampler keeps a snapshot of its state after each recent batch;
-the trainer saves ``state_dict(batch_id)`` for the last batch it consumed, and ``load_state_dict``
-continues with exactly the following batch.
+next batch, so nothing is dropped. With ``silence_pad`` (chrome.data.silence) every item gets a fifth
+field, the whole seconds of silence it takes from the batch's spare rows. The sampler keeps a snapshot
+of its state after each recent batch; the trainer saves ``state_dict(batch_id)`` for the last batch it
+consumed, and ``load_state_dict`` continues with exactly the following batch.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ from dataclasses import dataclass
 
 import numpy as np
 from torch.utils.data import Sampler
+
+from chrome.data.silence import PAD_TAG, SilencePad
 
 STATE_VERSION = 1
 _MASK = (1 << 64) - 1
@@ -50,6 +53,8 @@ class SourceStream:
     cost: np.ndarray
     weight: float
     fingerprint: str
+    # Clip seconds of every index row; only silence padding reads it.
+    seconds: np.ndarray | None = None
 
 
 def shard(stream: SourceStream, seed: int, epoch: int, rank: int, world_size: int) -> np.ndarray:
@@ -71,6 +76,7 @@ class MixtureBatchSampler(Sampler):
         world_size: int = 1,
         seed: int = 0,
         history: int = 4096,
+        silence_pad: SilencePad | None = None,
     ):
         active = [s for s in streams if s.weight > 0 and len(s.rows) > 0]
         if not active:
@@ -85,6 +91,9 @@ class MixtureBatchSampler(Sampler):
         self.world_size = int(world_size)
         self.seed = int(seed)
         self.history = int(history)
+        if silence_pad is not None and any(streams[i].seconds is None for i in silence_pad.eligible):
+            raise ValueError("silence_pad needs the clip seconds of every padded stream")
+        self.silence_pad = silence_pad
         weights = np.array([s.weight if len(s.rows) > 0 else 0.0 for s in streams], dtype=np.float64)
         self._cumulative = np.cumsum(weights / weights.sum())
         self._cumulative[-1] = 1.0
@@ -112,7 +121,7 @@ class MixtureBatchSampler(Sampler):
         self._samples += 1
         return source, row, sample_seed(self.seed, self.rank, self._samples)
 
-    def next_batch(self) -> list[tuple[int, int, int, int]]:
+    def next_batch(self) -> list[tuple[int, ...]]:
         batch: list[tuple[int, int, int]] = []
         tokens = 0
         while True:
@@ -127,7 +136,11 @@ class MixtureBatchSampler(Sampler):
         self._snapshots[self._batch_id] = self._snapshot()
         while len(self._snapshots) > self.history:
             self._snapshots.popitem(last=False)
-        return [(self._batch_id, source, row, seed) for source, row, seed in batch]
+        if self.silence_pad is None:
+            return [(self._batch_id, source, row, seed) for source, row, seed in batch]
+        extras = self.silence_pad.extras(batch, [s.seconds for s in self.streams], self.max_tokens - tokens,
+                                         sample_seed(self.seed, self.rank, self._batch_id, PAD_TAG))
+        return [(self._batch_id, source, row, seed, extra) for (source, row, seed), extra in zip(batch, extras)]
 
     def __iter__(self) -> Iterator[list[tuple[int, int, int, int]]]:
         while True:

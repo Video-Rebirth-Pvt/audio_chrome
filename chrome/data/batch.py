@@ -13,6 +13,7 @@ def collate_t2a(items: list[dict]) -> dict:
         "batch_id": items[0]["batch_id"],
         "waves": [item["wave"] for item in items],
         "seconds": torch.tensor([item["seconds"] for item in items], dtype=torch.long),
+        "silence_seconds": torch.tensor([item.get("silence_seconds", 0) for item in items], dtype=torch.long),
         "valid_samples": torch.tensor([item["valid_samples"] for item in items], dtype=torch.long),
         "input_ids": [item["input_ids"] for item in items],
         "text_len": torch.tensor([len(item["input_ids"]) for item in items], dtype=torch.long),

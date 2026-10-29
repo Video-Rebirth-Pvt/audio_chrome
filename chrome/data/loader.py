@@ -15,10 +15,12 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+from chrome.data.balance import LanguageBalance, run_budget
 from chrome.data.batch import collate_t2a
 from chrome.data.dataset import BadAudioList, T2ADataset
 from chrome.data.index import SourceIndex, SourceSpec, check_index, mixture_weight, source_specs
 from chrome.data.sampler import FixedBatchSampler, MixtureBatchSampler, SourceStream, pack_in_order, sample_seed
+from chrome.data.silence import SilencePad, describe
 from chrome.spec import AudioSpec
 
 
@@ -64,16 +66,32 @@ def train_streams(
                 cost=sample_cost(index, spec),
                 weight=mixture_weight(s, len(rows)),
                 fingerprint=f"{index.meta['config_fingerprint']}:{len(index)}{tag}",
+                seconds=index.seconds,
             )
         )
     return streams
+
+
+def balance_streams(streams: list[SourceStream], specs: list[SourceSpec], balance: LanguageBalance | None,
+                    budget: float | None, log=print) -> None:
+    """Re-weight ``streams`` in place by ``data.loader.language_balance`` (no-op when off)."""
+    if balance is None:
+        return
+    weights = np.array([s.weight if len(s.rows) else 0.0 for s in streams])
+    rows = np.array([len(s.rows) for s in streams], dtype=np.float64)
+    cost = np.array([float(s.cost[s.rows].mean()) if len(s.rows) else 0.0 for s in streams])
+    new, report = balance.weights([s.task for s in specs], weights, rows, cost, budget)
+    for stream, weight in zip(streams, new):
+        if len(stream.rows):
+            stream.weight = float(weight)
+    log("[data] " + balance.describe(report) + ("" if budget is not None else " (no train.max_steps: uncapped)"))
 
 
 def _worker_init(_: int) -> None:
     torch.set_num_threads(1)
 
 
-def _dataset(cfg, indexes, crop: str, cfg_drop: float) -> T2ADataset:
+def _dataset(cfg, indexes, crop: str, cfg_drop: float, silence_pad: SilencePad | None = None) -> T2ADataset:
     data = cfg["data"]
     return T2ADataset(
         indexes,
@@ -83,6 +101,7 @@ def _dataset(cfg, indexes, crop: str, cfg_drop: float) -> T2ADataset:
         cfg_drop=cfg_drop,
         peak=data.get("peak"),
         crop=crop,
+        silence_pad=silence_pad,
     )
 
 
@@ -105,17 +124,24 @@ def build_train_loader(
     loader_cfg = cfg["data"]["loader"]
     specs, indexes = open_sources(cfg, log)
     subset = loader_cfg.get("subset")
+    audio = AudioSpec.from_config(cfg)
+    silence_pad = SilencePad.from_config(cfg, [s.task for s in specs], rows_per_second(audio))
+    log("[data] " + describe(silence_pad, [s.name for s in specs]))
+    streams = train_streams(specs, indexes, audio, None if subset is None else int(subset))
+    balance_streams(streams, specs, LanguageBalance.from_config(cfg), run_budget(cfg, world_size), log)
     sampler = MixtureBatchSampler(
-        train_streams(specs, indexes, AudioSpec.from_config(cfg), None if subset is None else int(subset)),
+        streams,
         max_tokens=int(loader_cfg["max_tokens"]),
         max_samples=int(loader_cfg["max_samples"]),
         rank=rank,
         world_size=world_size,
         seed=int(loader_cfg["seed"]),
+        silence_pad=silence_pad,
     )
     if state is not None:
         sampler.load_state_dict(state, log)
-    dataset = _dataset(cfg, indexes, crop=str(loader_cfg["crop"]), cfg_drop=float(loader_cfg["cfg_drop"]))
+    dataset = _dataset(cfg, indexes, crop=str(loader_cfg["crop"]), cfg_drop=float(loader_cfg["cfg_drop"]),
+                       silence_pad=silence_pad)
     loader = _loader(dataset, sampler, int(loader_cfg["num_workers"]), int(loader_cfg["prefetch_factor"]))
     return loader, sampler
 

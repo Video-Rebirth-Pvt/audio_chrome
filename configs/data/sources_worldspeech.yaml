@@ -30,7 +30,32 @@ worldspeech_source: &ws
   columns: {audio: audio, caption: resp, duration: duration}
   keep:
     qa_risk_level: [clean, medium]
-    cer: {max: 0.25, allow_missing: false}
+    # Thresholds in data.quality.ws_small (configs/data/t2a_base.yaml); a missing snr / dnsmos_ovr passes.
+    cer:
+      max: ${data.quality.ws_small.cer_max}
+      allow_missing: false
+    snr:
+      min: ${data.quality.ws_small.snr_min}
+      allow_missing: true
+    dnsmos_ovr:
+      min: ${data.quality.ws_small.dnsmos_ovr_min}
+      allow_missing: true
+
+# zh_tw, yue_hk, ja_jp, ko_kr: per-character cer, data.quality.ws_cjk. The merge is shallow: this keep
+# replaces the whole keep of &ws.
+worldspeech_cjk: &ws_cjk
+  <<: *ws
+  keep:
+    qa_risk_level: [clean, medium]
+    cer:
+      max: ${data.quality.ws_cjk.cer_max}
+      allow_missing: false
+    snr:
+      min: ${data.quality.ws_cjk.snr_min}
+      allow_missing: true
+    dnsmos_ovr:
+      min: ${data.quality.ws_cjk.dnsmos_ovr_min}
+      allow_missing: true
 
 data:
   sources:
@@ -97,12 +122,12 @@ data:
     - {<<: *ws, name: ws_id_id, task: speech_id, paths: ["${paths.qa_sidecar_root}/id_id"]}
     - {<<: *ws, name: ws_ig_ng, task: speech_ig, paths: ["${paths.qa_sidecar_root}/ig_ng"]}
     - {<<: *ws, name: ws_iu_ca, task: speech_iu, paths: ["${paths.qa_sidecar_root}/iu_ca"]}
-    - {<<: *ws, name: ws_ja_jp, task: speech_ja, paths: ["${paths.qa_sidecar_root}/ja_jp"]}
+    - {<<: *ws_cjk, name: ws_ja_jp, task: speech_ja, paths: ["${paths.qa_sidecar_root}/ja_jp"]}
     - {<<: *ws, name: ws_ka_ge, task: speech_ka, paths: ["${paths.qa_sidecar_root}/ka_ge"]}
     - {<<: *ws, name: ws_kk_kz, task: speech_kk, paths: ["${paths.qa_sidecar_root}/kk_kz"]}
     - {<<: *ws, name: ws_kn_in, task: speech_kn, paths: ["${paths.qa_sidecar_root}/kn_in"]}
     - {<<: *ws, name: ws_kok_in, task: speech_kok, paths: ["${paths.qa_sidecar_root}/kok_in"]}
-    - {<<: *ws, name: ws_ko_kr, task: speech_ko, paths: ["${paths.qa_sidecar_root}/ko_kr"]}
+    - {<<: *ws_cjk, name: ws_ko_kr, task: speech_ko, paths: ["${paths.qa_sidecar_root}/ko_kr"]}
     - {<<: *ws, name: ws_la_va, task: speech_la, paths: ["${paths.qa_sidecar_root}/la_va"]}
     - {<<: *ws, name: ws_lb_lu, task: speech_lb, paths: ["${paths.qa_sidecar_root}/lb_lu"]}
     - {<<: *ws, name: ws_mai_in, task: speech_mai, paths: ["${paths.qa_sidecar_root}/mai_in"]}
@@ -154,6 +179,6 @@ data:
     - {<<: *ws, name: ws_uz_uz, task: speech_uz, paths: ["${paths.qa_sidecar_root}/uz_uz"]}
     - {<<: *ws, name: ws_ve_za, task: speech_ve, paths: ["${paths.qa_sidecar_root}/ve_za"]}
     - {<<: *ws, name: ws_xh_za, task: speech_xh, paths: ["${paths.qa_sidecar_root}/xh_za"]}
-    - {<<: *ws, name: ws_yue_hk, task: speech_yue, paths: ["${paths.qa_sidecar_root}/yue_hk"]}
-    - {<<: *ws, name: ws_zh_tw, task: speech_zh, paths: ["${paths.qa_sidecar_root}/zh_tw"]}
+    - {<<: *ws_cjk, name: ws_yue_hk, task: speech_yue, paths: ["${paths.qa_sidecar_root}/yue_hk"]}
+    - {<<: *ws_cjk, name: ws_zh_tw, task: speech_zh, paths: ["${paths.qa_sidecar_root}/zh_tw"]}
     - {<<: *ws, name: ws_zu_za, task: speech_zu, paths: ["${paths.qa_sidecar_root}/zu_za"]}

@@ -25,6 +25,58 @@ data:
     - ${paths.vrfoley_root}/audio_pretrain/outputs/bad_audio.txt
   # Build / inspect only these sources, e.g. data.only=[music,freesound]. The loader always uses all.
   only: null
+  # WorldSpeech quality tiers, read by the anchors of sources_t2a_ws_cv.yaml and sources_worldspeech.yaml:
+  #   ws_large  en, fr: rows exceed their 500k budget, so a stricter cut only swaps rows
+  #   ws_es     es: over budget too, but a lower snr floor keeps more of es_es (most of it is under snr 8)
+  #   ws_cjk    zh_tw, yue_hk, ja_jp, ko_kr: cer is per character, so the same errors score higher
+  #   ws_small  every other locale
+  # A row passes cer <= cer_max (cer must be present) and snr / dnsmos_ovr >= the floor or missing; a null
+  # floor is off. Part of every ws_* fingerprint: a change rebuilds those sources, e.g.
+  # data.quality.ws_cjk.cer_max=0.25 data.only=[ws_ja_jp].
+  quality:
+    ws_large:
+      cer_max: 0.2
+      snr_min: 8
+      dnsmos_ovr_min: 2.5
+    # English only (French stays on ws_large): 576k train rows of 3–20 s pass, 647k at cer 0.2.
+    ws_en:
+      cer_max: 0.15
+      snr_min: 8
+      dnsmos_ovr_min: 2.5
+    ws_es:
+      cer_max: 0.2
+      snr_min: 6
+      dnsmos_ovr_min: 2.5
+    ws_cjk:
+      cer_max: 0.22
+      snr_min: 3
+      dnsmos_ovr_min: 2
+    ws_small:
+      cer_max: 0.2
+      snr_min: 3
+      dnsmos_ovr_min: 2
+    # hifitts2 in sources_t2a_ws_cv.yaml: wer <= wer_max (every row has wer). Of its 10.9M rows of 3–20 s,
+    # 10.6M pass 0.2 and ~10.4M pass 0.18 (sampled), far over the 3M max_records, so a stricter value only
+    # swaps rows.
+    hifitts2:
+      wer_max: 0.18
+    # zhizhou in sources_t2a_ws_cv.yaml: bw_flag and loudness_flag in the lists, cer <= cer_max and
+    # dnsmos >= dnsmos_min, a missing cer / dnsmos passes (half the rows have no cer, 41% no dnsmos).
+    # bw_flag: ok 62%, inflated 25%, hf_limited 10%, likely_8k 2.4% (telephone band, ~3% of kept rows);
+    # loudness_flag: normal 75%, quiet 25%, silence 0.1% (loud kept too if present). ~8.9M rows of 3–20 s pass (sampled), over the
+    # 5M max_records, so a stricter value only swaps rows.
+    zhizhou:
+      bw_flag: [ok, likely_8k]
+      loudness_flag: [normal, quiet, loud]
+      cer_max: 0.22
+      dnsmos_min: 2.2
+    # CommonVoice (all cv_* in sources_t2a_ws_cv.yaml). Sampled 2026-10-28: normal 82.7%, quiet 13.5%,
+    # loud 3.7%, silence 0.06%, hot 0.04%, none missing (a missing flag would be dropped).
+    cv:
+      loudness_flag: [normal, quiet, loud]
+      # cv_en only, drops likely_8k (1.2%). 3–20 s sampled: hf_limited 46%, inflated 26%, likely_22k 15%,
+      # likely_16k 12%, ok 0.1% (mp3s are band-limited); 1.15M rows for the 200k max_records.
+      en_bw_flag: [ok, likely_22k, likely_16k, hf_limited, inflated]
   source_defaults:
     task: misc
     # null: mix by how many train rows this source kept. A number over/under-samples after the cap.
@@ -33,6 +85,10 @@ data:
     long: drop
     # Rows whose path hash falls in this many per million are held out; stable as data is added.
     holdout_ppm: 500
+    # null: max_records / max_hours keep a fixed path-hash prefix (the same random subset on every rebuild).
+    # A number reorders before the cut, so another seed keeps another random subset of capped sources; the
+    # holdout and uncapped sources (and their fingerprints) do not change.
+    sample_seed: null
   build:
     workers: 64
     # JSONL is split into byte ranges of this size, one per worker task.
@@ -54,6 +110,35 @@ data:
     crop: random
     # Train on only the first N rows of every source by path hash (smoke tests); null = all rows.
     subset: null
+    # Speech clips take the rows their batch left unused as whole seconds of silence, so a short caption
+    # no longer always fills its window (chrome.data.silence). Packing, row order and caption dropout are
+    # identical either way; false = the previous training exactly. Train only; val/preview never pad.
+    silence_pad:
+      enabled: false
+      tasks: [speech_*]
+      # Share of each batch's spare rows (max_tokens − used) that may become silence.
+      max_fill: 1.0
+      min_extra_seconds: 1
+      max_extra_seconds: 3
+      # Padded window ≤ max_ratio × clip seconds (5 s → ≤ 8 s); also ≤ audio.max_seconds.
+      max_ratio: 1.6
+      # Where the silence goes: after the speech (short lead-in), before it (short tail), or split.
+      placement: {after: 0.7, before: 0.15, both: 0.15}
+      # Lead-in for "after" / tail for "before", uniform in this range.
+      onset_seconds: [0.0, 0.7]
+      # Fade on speech edges that meet added silence.
+      fade_ms: 20
+    # Small languages drawn more often (chrome.data.balance): every task matching `tasks` (one language)
+    # gets a share ∝ rows^alpha of the speech mass, capped at max_epochs over train.max_steps; sources
+    # inside a task and non-speech tasks keep their shares. false = mix by rows as before. No rebuild,
+    # resumes as usual; validation is unaffected.
+    language_balance:
+      enabled: false
+      tasks: [speech_*]
+      # 1 = by rows; 0.5 is much flatter.
+      alpha: 0.8
+      # Most epochs a raised language may reach over the planned run; null = no cap.
+      max_epochs: 10
   val:
     # Holdout clips per source, smallest path hash first (stable). 0 holdout → source skipped.
     per_source: 256

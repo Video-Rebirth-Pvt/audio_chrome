@@ -13,6 +13,7 @@ manifest itself: row i gets ``audio = <blobs>/<parent dir>/<stem>.arrow#i``, che
 from __future__ import annotations
 
 import fnmatch
+import math
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,32 +76,35 @@ def _is_range(spec) -> bool:
     return isinstance(spec, Mapping) and any(key in spec for key in ("min", "max", "allow_missing"))
 
 
-def row_kept(row: Mapping, keep: Mapping) -> bool:
-    """Exact match or any of a list (compared as strings), or ``{min, max, allow_missing}``.
+def keep_check(row: Mapping, keep: Mapping) -> tuple[str | None, list[str]]:
+    """(first field that fails ``keep``, or None; range fields that passed only because the value is missing).
 
-    Missing numbers pass a range by default.
+    Exact match or any of a list (compared as strings), or ``{min, max, allow_missing}``: null, "" and NaN
+    are missing and pass a range unless ``allow_missing: false``; a null min / max is no bound.
     """
+    missing: list[str] = []
     for key, spec in keep.items():
         value = row.get(key)
         if isinstance(spec, Sequence) and not isinstance(spec, str):
             if str(value) not in {str(s) for s in spec}:
-                return False
+                return key, missing
         elif _is_range(spec):
-            if value in (None, ""):
-                if not spec.get("allow_missing", True):
-                    return False
-                continue
             try:
-                number = float(value)
+                number = None if value in (None, "") else float(value)
             except (TypeError, ValueError):
-                return False
+                return key, missing
+            if number is None or math.isnan(number):
+                if not spec.get("allow_missing", True):
+                    return key, missing
+                missing.append(key)
+                continue
             if spec.get("min") is not None and number < float(spec["min"]):
-                return False
+                return key, missing
             if spec.get("max") is not None and number > float(spec["max"]):
-                return False
+                return key, missing
         elif str(value) != str(spec):
-            return False
-    return True
+            return key, missing
+    return None, missing
 
 
 @dataclass(frozen=True)

@@ -169,6 +169,9 @@ def cmd_inspect(cfg) -> int:
     print("\nDropped rows (reason: count)")
     for spec in specs:
         drops = ", ".join(f"{k}: {v}" for k, v in metas[spec.name]["drops"].items()) or "-"
+        missing = metas[spec.name].get("keep_missing") or {}
+        if missing:
+            drops += " | passed with the keep field missing: " + ", ".join(f"{k}: {v}" for k, v in missing.items())
         print(f"  {spec.name}: {drops}")
 
     print("\nLength histogram of train clips (seconds: share)")
@@ -177,6 +180,7 @@ def cmd_inspect(cfg) -> int:
         total = max(sum(hist.values()), 1)
         print(f"  {spec.name}: " + " ".join(f"{s}:{c / total:.0%}" for s, c in sorted(hist.items(), key=lambda kv: int(kv[0]))))
 
+    from chrome.data.balance import LanguageBalance, run_budget
     from chrome.data.index import mixture_weight
     from chrome.data.loader import rows_per_second
     from chrome.spec import AudioSpec
@@ -186,11 +190,16 @@ def cmd_inspect(cfg) -> int:
     if weights.sum() <= 0:
         print("\nAll mixture weights are 0; nothing would be sampled.")
         return 0
-    share = weights / weights.sum()
     mean_s = np.array([metas[s.name]["train"].get("mean_seconds", 0.0) for s in specs])
     mean_t = np.array([metas[s.name]["train"].get("text_tokens", {}).get("mean", 0.0) for s in specs])
 
     cost = rows_per_second(AudioSpec.from_config(cfg)) * mean_s + mean_t
+    balance = LanguageBalance.from_config(cfg)
+    if balance is not None:
+        budget = run_budget(cfg, int(inspect["world_size"]), int(inspect["grad_accum"]), int(inspect["steps"]))
+        weights, report = balance.weights([s.task for s in specs], weights, train_rows, cost, budget)
+        print("\n" + balance.describe(report))
+    share = weights / weights.sum()
     per_batch = int(data["loader"]["max_tokens"]) / float((share * cost).sum())
     per_step = per_batch * int(inspect["world_size"]) * int(inspect["grad_accum"])
     steps = int(inspect["steps"])
@@ -201,7 +210,8 @@ def cmd_inspect(cfg) -> int:
         caps = ([f"{spec.max_records:g}"] if spec.max_records is not None else []) + (
             [f"{spec.max_hours:g} h"] if spec.max_hours is not None else [])
         cap = " / ".join(caps) or "all"
-        mix = "rows" if spec.weight is None else f"{spec.weight:g}"
+        mix = ("rows" if spec.weight is None else f"{spec.weight:g}") + (
+            "" if balance is None or not balance.matches(spec.task) else " (bal)")
         rows.append([spec.name, cap, mix, f"{share[i]:.1%}", f"{hours[i] / hours.sum():.1%}",
                      f"{share[i] * cost[i] / (share * cost).sum():.1%}", f"{epochs:.2f}"])
     print(f"\nMixture: ≈{per_batch:.1f} clips per batch of {data['loader']['max_tokens']} tokens, "
@@ -248,7 +258,7 @@ def cmd_bench(cfg) -> int:
     max_tokens = int(cfg["data"]["loader"]["max_tokens"])
     seen: Counter = Counter()
     seconds_hist: Counter = Counter()
-    clips = tokens = audio_seconds = dropped = 0
+    clips = tokens = audio_seconds = dropped = padded = silence = 0
     encode_time = 0.0
     dumped = 0
     started = time.monotonic()
@@ -258,11 +268,13 @@ def cmd_bench(cfg) -> int:
             first_batch = time.monotonic() - started
         if step == warmup + 1:
             started_timed = time.monotonic()
-            clips = tokens = audio_seconds = dropped = 0
+            clips = tokens = audio_seconds = dropped = padded = silence = 0
             encode_time = 0.0
         seconds = batch["seconds"]
         clips += len(seconds)
         audio_seconds += int(seconds.sum())
+        padded += int((batch["silence_seconds"] > 0).sum())
+        silence += int(batch["silence_seconds"].sum())
         tokens += int((seconds * per_second + batch["text_len"]).sum())
         dropped += int(batch["cfg_dropped"].sum())
         seen.update(names[i] for i in batch["source"].tolist())
@@ -276,7 +288,8 @@ def cmd_bench(cfg) -> int:
         for i in range(len(batch["waves"])):
             if dumped >= dump:
                 break
-            name = f"{dumped:02d}_{names[int(batch['source'][i])]}_{int(seconds[i])}s"
+            pad = int(batch["silence_seconds"][i])
+            name = f"{dumped:02d}_{names[int(batch['source'][i])]}_{int(seconds[i])}s" + (f"_pad{pad}" if pad else "")
             save_audio(out / f"{name}.wav", batch["waves"][i], cfg["audio"]["sample_rate"])
             (out / f"{name}.txt").write_text(f"{batch['paths'][i]}\n{batch['captions'][i]}\n", encoding="utf-8")
             dumped += 1
@@ -291,6 +304,9 @@ def cmd_bench(cfg) -> int:
           f"{clips / elapsed:.1f} clips/s, {audio_seconds / elapsed:.0f} audio-s/s, {tokens / elapsed:.0f} rows/s")
     print(f"[bench] per batch: {clips / timed:.1f} clips, {tokens / timed:.0f} tokens "
           f"({tokens / timed / max_tokens:.0%} of max_tokens={max_tokens}); caption dropout {dropped / max(clips, 1):.1%}")
+    if sampler.silence_pad is not None:
+        print(f"[bench] silence pad: {padded / max(clips, 1):.1%} of clips, +{silence / max(padded, 1):.2f} s each, "
+              f"{silence / max(audio_seconds, 1):.1%} of audio seconds")
     total_seen = max(sum(seen.values()), 1)
     print("[bench] source share seen / expected: " + ", ".join(
         f"{n} {seen[n] / total_seen:.1%}/{expected[i]:.1%}" for i, n in enumerate(names)))

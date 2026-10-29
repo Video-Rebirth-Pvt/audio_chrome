@@ -12,6 +12,7 @@ from torch.utils.data import Dataset
 from chrome.data.audio_io import limit_peak, read_audio, read_audio_window, resample, to_stereo
 from chrome.data.captions import NULL_CAPTION, caption_ids, load_caption_tokenizer
 from chrome.data.index import SourceIndex, read_path_list
+from chrome.data.silence import PAD_TAG, SilencePad
 from chrome.spec import AudioSpec
 
 
@@ -46,7 +47,8 @@ class T2ADataset(Dataset):
     """Indexed by ``(batch_id, source, row, sample_seed)`` from the batch samplers.
 
     The window start and the caption dropout come from ``sample_seed``, so a resumed run reproduces them.
-    A clip that fails to decode is recorded and replaced by a random train row of the same source.
+    A clip that fails to decode is recorded and replaced by a random train row of the same source. A fifth
+    item field (silence padding) lengthens the clip by that many seconds of silence around its audio.
     """
 
     def __init__(
@@ -59,6 +61,7 @@ class T2ADataset(Dataset):
         peak: float | None = 0.95,
         crop: str = "random",
         retries: int = 8,
+        silence_pad: SilencePad | None = None,
     ):
         if crop not in ("random", "center", "start"):
             raise ValueError(f"crop must be random|center|start, got {crop}")
@@ -70,6 +73,7 @@ class T2ADataset(Dataset):
         self.peak = peak
         self.crop = crop
         self.retries = int(retries)
+        self.silence_pad = silence_pad
         self._tokenizer = None
 
     def __len__(self) -> int:
@@ -101,8 +105,9 @@ class T2ADataset(Dataset):
             waveform = torch.nn.functional.pad(waveform, (0, target - waveform.shape[-1]))
         return limit_peak(waveform, self.peak).contiguous(), valid
 
-    def __getitem__(self, item: tuple[int, int, int, int]) -> dict:
-        batch_id, source, row, seed = item
+    def __getitem__(self, item: tuple[int, ...]) -> dict:
+        batch_id, source, row, seed = item[:4]
+        extra = int(item[4]) if len(item) > 4 else 0
         rng = random.Random(seed)
         index = self.indexes[source]
         errors = []
@@ -121,10 +126,16 @@ class T2ADataset(Dataset):
             raise RuntimeError(f"{index.name}: {self.retries} clips failed to decode; " + " | ".join(errors[:3]))
         dropped = rng.random() < self.cfg_drop
         ids = caption_ids(self.tokenizer, NULL_CAPTION if dropped else caption)
+        extra = min(extra, self.silence_pad.cap(seconds)) if self.silence_pad is not None else 0
+        if extra:
+            # cap() again: a replacement row may be longer than the one the batch budgeted for.
+            waveform, _ = self.silence_pad.place(waveform, valid, extra, self.spec.sample_rate,
+                                                 random.Random(seed ^ PAD_TAG))
         return {
             "batch_id": batch_id,
             "wave": waveform,
-            "seconds": seconds,
+            "seconds": seconds + extra,
+            "silence_seconds": extra,
             "valid_samples": valid,
             "input_ids": torch.tensor(ids, dtype=torch.long),
             "cfg_dropped": dropped,

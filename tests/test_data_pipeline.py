@@ -13,12 +13,17 @@ Checks:
   5. holdout by path hash is stable when rows are added
   6. sampler: deterministic, exact resume, disjoint rank shards, token budget, weight shares
   6b. max_records caps train rows; max_hours caps train clip hours (hash prefix, raising only adds rows);
+      sample_seed draws another capped subset (reproducible, holdout unchanged, no effect without a cap);
       omitted weight mixes by kept row count
   7. dataset: fixed lengths, padding, peak limit, channel folding, seeded window reads, caption dropout,
      bad files replaced and recorded
   8. VAE batch grouping keeps order and never pads
   9. DataLoader with workers: resume continues with the next batch; validation uses holdout rows only
   9b. val quota is source-balanced: a small budget still keeps every holdout source; prefix-cutting cannot drop the last one
+  9c. silence_pad: off by default; same batches / rows / caption dropout as off; deterministic and resumable;
+      speech sources only, within spare rows, max_ratio and max_seconds; placement keeps the speech; val never pads
+  9d. language_balance: off by default; alpha 1 = plain mix; raises small languages, keeps non-speech share and
+      in-task ratios; max_epochs caps, never below the plain share
   10. HF parquet with embedded audio: include glob, sidecar join (+ misaligned sidecar rejected), list keep,
       repack to Arrow (skip when current), refs decode to the same clip, stale repack rejected
   11. migrate in place: dry run writes nothing, parquet deleted only when its sidecar matches, resumes;
@@ -32,6 +37,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import random
 import shutil
 import sys
 import tempfile
@@ -48,6 +54,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from chrome.config import load_config  # noqa: E402
+from chrome.data.balance import LanguageBalance  # noqa: E402
 from chrome.data.batch import collate_t2a, encode_waves  # noqa: E402
 from chrome.data.captions import NULL_CAPTION, caption_ids, load_caption_tokenizer  # noqa: E402
 from chrome.data.dataset import BadAudioList, T2ADataset  # noqa: E402
@@ -71,8 +78,9 @@ from chrome.data.loader import (  # noqa: E402
     train_streams,
     validation_batches,
 )
-from chrome.data.manifest import Chunk, iter_rows, plan_chunks  # noqa: E402
+from chrome.data.manifest import Chunk, iter_rows, keep_check, plan_chunks  # noqa: E402
 from chrome.data.sampler import MixtureBatchSampler, shard  # noqa: E402
+from chrome.data.silence import SilencePad  # noqa: E402
 from chrome.spec import AudioSpec  # noqa: E402
 
 FAILED: list[str] = []
@@ -204,6 +212,23 @@ def check_policy() -> None:
     check("length policy", got == [c[3] for c in cases], got=got)
 
 
+def check_keep() -> None:
+    keep = {"qa": ["clean", "medium"], "cer": {"max": 0.25, "allow_missing": False}, "snr": {"min": 5},
+            "ovr": {"min": None, "allow_missing": True}}
+    rows = [
+        ({"qa": "clean", "cer": 0.1, "snr": 20.0, "ovr": 1.0}, (None, [])),
+        ({"qa": "high", "cer": 0.1, "snr": 20.0, "ovr": 3.0}, ("qa", [])),
+        ({"qa": "clean", "cer": float("nan"), "snr": 20.0, "ovr": 3.0}, ("cer", [])),
+        ({"qa": "clean", "cer": 0.1, "snr": 4.9, "ovr": 3.0}, ("snr", [])),
+        ({"qa": "clean", "cer": 0.1, "snr": "5", "ovr": 3.0}, (None, [])),
+        ({"qa": "clean", "cer": 0.1, "snr": float("nan"), "ovr": None}, (None, ["snr", "ovr"])),
+        ({"qa": "clean", "cer": 0.1, "ovr": ""}, (None, ["snr", "ovr"])),
+        ({"qa": "clean", "cer": 0.1, "snr": "loud"}, ("snr", [])),
+    ]
+    got = [keep_check(row, keep) for row, _ in rows]
+    check("keep: lists, ranges, NaN / null / '' as missing, null bound", got == [want for _, want in rows], got=got)
+
+
 def check_chunks(corpus: dict) -> None:
     path = corpus["bulk"]
     whole = [r["path"] for r in iter_rows(Chunk(path, "jsonl", 0, Path(path).stat().st_size))]
@@ -220,7 +245,7 @@ def check_build(cfg, corpus: dict) -> dict:
     expected = {f["slack"]: 4, f["pad"]: 7, f["six"]: 13, f["full"]: 15, f["nodur"]: 6, f["corrupt"]: 5}
     check("index rows and lengths", seconds == expected, seconds={Path(k).stem: v for k, v in seconds.items()})
     drops = metas["speech"]["drops"]
-    want = {"too_short": 1, "too_long": 1, "no_caption": 1, "bad_json": 1, "duplicate": 1, "excluded": 1, "keep_filter": 1}
+    want = {"too_short": 1, "too_long": 1, "no_caption": 1, "bad_json": 1, "duplicate": 1, "excluded": 1, "keep:cer": 1}
     check("drop reasons", all(drops.get(k) == v for k, v in want.items()), drops=drops)
     music = SourceIndex(Path(cfg.data.index_root) / "music")
     got = {Path(music.row(i)[0]).stem: int(music.seconds[i]) for i in range(len(music))}
@@ -332,6 +357,36 @@ def check_max_records(cfg, tmp: Path) -> None:
         check("max_hours change demands a rebuild", False)
     except RuntimeError:
         check("max_hours change demands a rebuild", True)
+
+    full_index = SourceIndex(Path(cfg.data.index_root) / "bulk")
+    full_holdout = set(full_index.keys()[full_index.holdout].tolist())
+    drawn = []
+    for run, seed in enumerate((None, 1, 2, 1)):
+        root = tmp / f"index_seed_{run}"
+        seeded = OmegaConf.merge(cfg, {"data": {"index_root": str(root)}})
+        seeded.data.sources[2].max_records = 80
+        seeded.data.sources[2].sample_seed = seed
+        spec = next(s for s in source_specs(seeded) if s.name == "bulk")
+        build_source(spec, seeded, workers=4, log=lambda *_: None)
+        index = SourceIndex(root / "bulk")
+        drawn.append((set(index.keys()[~index.holdout].tolist()), set(index.keys()[index.holdout].tolist()),
+                      config_fingerprint(spec, seeded)))
+    plain, one, two, again = drawn
+    check("sample_seed draws another capped subset", len(one[0]) == 80 and one[0] != plain[0] and one[0] != two[0],
+          overlap=len(one[0] & plain[0]))
+    check("sample_seed is reproducible", one[0] == again[0] and one[2] == again[2])
+    check("sample_seed keeps the holdout", plain[1] == one[1] == two[1] == full_holdout)
+    check("sample_seed change demands a rebuild", len({plain[2], one[2], two[2]}) == 3)
+    uncapped = OmegaConf.merge(cfg, {})
+    uncapped.data.sources[2].sample_seed = 7
+    check("sample_seed without a cap keeps the fingerprint",
+          config_fingerprint(next(s for s in source_specs(uncapped) if s.name == "bulk"), uncapped)
+          == full["config_fingerprint"])
+    try:
+        SourceSpec.from_config({"name": "n", "paths": ["/x"], "sample_seed": -1}, {})
+        check("sample_seed < 0 is rejected", False)
+    except ValueError:
+        check("sample_seed < 0 is rejected", True)
 
     equal = OmegaConf.merge(cfg, {})
     for source in equal.data.sources:
@@ -503,6 +558,136 @@ def check_loader(cfg) -> None:
     check_val_quota(cfg, specs, indexes)
 
 
+def check_silence_pad(cfg) -> None:
+    specs, indexes = open_sources(cfg, log=lambda *_: None)
+    audio = AudioSpec.from_config(cfg)
+    streams = train_streams(specs, indexes, audio)
+    tasks = [s.task for s in specs]
+    check("silence_pad off by default", SilencePad.from_config(cfg, tasks, 80) is None)
+    on = OmegaConf.merge(cfg, {"data": {"loader": {"silence_pad": {"enabled": True}}}})
+    pad = SilencePad.from_config(on, tasks, 80)
+    check("silence_pad only on speech_* sources", pad is not None and pad.eligible == {0}, eligible=sorted(pad.eligible))
+    try:
+        SilencePad.from_config(OmegaConf.merge(on, {"data": {"loader": {"silence_pad": {"max_ratio": 1.0}}}}), tasks, 80)
+        check("silence_pad max_ratio <= 1 is rejected", False)
+    except ValueError:
+        check("silence_pad max_ratio <= 1 is rejected", True)
+
+    make = lambda p: MixtureBatchSampler(streams, 4096, 64, 0, 1, seed=5, silence_pad=p)  # noqa: E731
+    a, b, off = make(pad), make(pad), make(None)
+    padded = [a.next_batch() for _ in range(60)]
+    unpadded = [off.next_batch() for _ in range(60)]
+    check("silence_pad keeps batches and rows", [[item[:4] for item in batch] for batch in padded] == unpadded
+          and all(len(item) == 4 for batch in unpadded for item in batch))
+    check("silence_pad is deterministic", padded == [b.next_batch() for _ in range(60)])
+    resumed = make(pad)
+    resumed.load_state_dict(a.state_dict(40), log=lambda *_: None)
+    check("silence_pad resume replays the padding", [resumed.next_batch() for _ in range(20)] == padded[40:])
+    ok, extras = True, []
+    for batch in padded:
+        used = sum(int(streams[s].cost[r]) + 80 * extra for _, s, r, _, extra in batch)
+        ok &= used <= 4096
+        for _, s, r, _, extra in batch:
+            seconds = int(streams[s].seconds[r])
+            if extra:
+                extras.append(extra)
+                ok &= s in pad.eligible and 1 <= extra <= 3 and seconds + extra <= min(1.6 * seconds, audio.max_seconds)
+    check("silence_pad within spare rows, ratio, max_seconds and speech only", ok and len(extras) > 0,
+          padded=len(extras), extras=sorted(set(extras)))
+
+    rate = audio.sample_rate
+    wave = torch.zeros(2, 7 * rate)
+    wave[:, : int(6.5 * rate)] = 0.5
+    valid = int(6.5 * rate)
+    leads, trails, kept = [], [], True
+    for seed in range(1000):
+        out, lead = pad.place(wave, valid, 2, rate, random.Random(seed))
+        fade = int(pad.fade_ms * rate / 1000)
+        middle = out[:, lead + fade: lead + valid - fade]
+        kept &= out.shape == (2, 9 * rate) and bool((middle == 0.5).all()) and float(out[:, :lead].abs().sum()) == 0 \
+            and float(out[:, lead + valid:].abs().sum()) == 0
+        leads.append(lead / rate)
+        trails.append((out.shape[-1] - lead - valid) / rate)
+    leads, trails = np.array(leads), np.array(trails)
+    check("silence placement keeps the speech, zeros elsewhere", kept)
+    check("silence placement: mostly after a short lead-in",
+          0.6 < np.mean((leads <= 0.7) & (trails > 0.7)) < 0.85 and 0.08 < np.mean(trails <= 0.7) < 0.3,
+          after=round(float(np.mean(leads <= 0.7)), 3), before=round(float(np.mean(trails <= 0.7)), 3))
+
+    bad = BadAudioList(cfg.data.bad_list)
+    plain_set = T2ADataset(indexes, audio, cfg.data.tokenizer, bad, cfg_drop=0.5, crop="random")
+    pad_set = T2ADataset(indexes, audio, cfg.data.tokenizer, bad, cfg_drop=0.5, crop="random", silence_pad=pad)
+    speech = indexes[0]
+    row = next(i for i in range(len(speech)) if Path(speech.row(i)[0]).stem == "pad")
+    base, ignored, grown = plain_set[(1, 0, row, 7)], plain_set[(1, 0, row, 7, 2)], pad_set[(1, 0, row, 7, 2)]
+    check("dataset without silence_pad ignores the extra field",
+          torch.equal(base["wave"], ignored["wave"]) and ignored["seconds"] == 7 and ignored["silence_seconds"] == 0)
+    check("dataset pads the window, same caption draw",
+          tuple(grown["wave"].shape) == (2, 9 * rate) and grown["seconds"] == 9 and grown["silence_seconds"] == 2
+          and grown["valid_samples"] == base["valid_samples"] and grown["cfg_dropped"] == base["cfg_dropped"],
+          shape=tuple(grown["wave"].shape))
+    capped = pad_set[(1, 0, row, 7, 9)]
+    check("dataset clamps extra to the clip's cap", capped["silence_seconds"] == pad.cap(7), got=capped["silence_seconds"])
+
+    loader, _ = build_train_loader(on, log=lambda *_: None)
+    loader_off, _ = build_train_loader(cfg, log=lambda *_: None)
+    got, ref = [], []
+    for batch in loader:
+        got.append(batch)
+        if len(got) == 5:
+            break
+    for batch in loader_off:
+        ref.append(batch)
+        if len(ref) == 5:
+            break
+    same_rows = all(g["paths"] == r["paths"] and torch.equal(g["cfg_dropped"], r["cfg_dropped"]) for g, r in zip(got, ref))
+    lengths = all(w.shape[-1] == int(s) * rate for g in got for w, s in zip(g["waves"], g["seconds"]))
+    check("loader with silence_pad: same clips, padded lengths", same_rows and lengths
+          and all(int(r["silence_seconds"].sum()) == 0 for r in ref),
+          padded=sum(int((g["silence_seconds"] > 0).sum()) for g in got))
+    val = list(build_val_loader(on, log=lambda *_: None))
+    check("validation never pads", all(int(b["silence_seconds"].sum()) == 0 for b in val), batches=len(val))
+    del loader, loader_off
+
+
+def check_language_balance(cfg) -> None:
+    check("language_balance off by default", LanguageBalance.from_config(cfg) is None)
+    tasks = ["speech_zh", "speech_zh", "speech_en", "speech_ja", "speech_nan", "music"]
+    rows = np.array([4000.0, 1000.0, 3000.0, 80.0, 20.0, 2000.0])
+    cost = np.full(len(rows), 500.0)
+    plain = rows / rows.sum()
+    flat, _ = LanguageBalance(alpha=1.0, max_epochs=None).weights(tasks, rows, rows, cost, None)
+    check("alpha 1 keeps the plain mix", np.allclose(flat, rows))
+    new, report = LanguageBalance(alpha=0.5, max_epochs=None).weights(tasks, rows, rows, cost, None)
+    share = new / new.sum()
+    by = {r["task"]: r for r in report}
+    check("balance raises small languages, lowers large ones",
+          by["speech_ja"]["share"] > 2 * by["speech_ja"]["plain"] and by["speech_zh"]["share"] < by["speech_zh"]["plain"],
+          ja=round(by["speech_ja"]["share"], 4), zh=round(by["speech_zh"]["share"], 4))
+    check("balance keeps non-speech share, total and in-task ratios",
+          abs(share[5] - plain[5]) < 1e-12 and abs(new.sum() - rows.sum()) < 1e-6 and abs(share[0] / share[1] - 4.0) < 1e-9)
+    budget = 20000.0 * 500.0
+    capped, report = LanguageBalance(alpha=0.5, max_epochs=5).weights(tasks, rows, rows, cost, budget)
+    epochs = {r["task"]: r["epochs"] for r in report}
+    share = capped / capped.sum()
+    check("max_epochs caps the raised languages",
+          max(epochs.values()) <= 5 + 1e-6 and epochs["speech_nan"] > 4.9 and abs(share[5] - plain[5]) < 1e-12,
+          epochs={k: round(v, 2) for k, v in epochs.items()})
+    tight, report = LanguageBalance(alpha=0.5, max_epochs=0.5).weights(tasks, rows, rows, cost, budget)
+    check("cap never pushes a language below its plain share",
+          all(r["share"] >= r["plain"] - 1e-12 for r in report))
+    try:
+        LanguageBalance.from_config(OmegaConf.merge(cfg, {"data": {"loader": {"language_balance": {"enabled": True, "alpha": 0}}}}))
+        check("language_balance alpha <= 0 is rejected", False)
+    except ValueError:
+        check("language_balance alpha <= 0 is rejected", True)
+    on = OmegaConf.merge(cfg, {"data": {"loader": {"language_balance": {"enabled": True}}}})
+    _, sampler = build_train_loader(on, log=lambda *_: None)
+    _, plain_sampler = build_train_loader(cfg, log=lambda *_: None)
+    check("loader with language_balance: one speech language → same weights",
+          np.allclose([s.weight for s in sampler.streams], [s.weight for s in plain_sampler.streams], rtol=1e-12))
+
+
 SHARD_ROWS = {
     "train-00000": ([5.0, 6.5, 3.0, 8.05], ["clean", "high", "medium", "clean"]),
     "train-00001": ([7.0, 4.4], ["medium", "clean"]),
@@ -566,7 +751,7 @@ def check_embedded(base_cfg, tmp: Path) -> None:
     index = SourceIndex(Path(cfg.data.index_root) / "hf")
     rows = {index.row(i)[1].split("] ")[-1][:-4]: index.row(i)[0] for i in range(len(index))}
     check("include + sidecar join + list keep", set(rows) == KEPT_SEGMENTS
-          and meta["drops"].get("keep_filter") == 1 and meta["drops"].get("too_short") == 1,
+          and meta["drops"].get("keep:qa_risk_level") == 1 and meta["drops"].get("too_short") == 1,
           kept=sorted(rows), drops=meta["drops"])
     file, row = parse_blob_ref(rows["train-00000_seg3"])
     check("ref points at the shard row", file.endswith("xx_yy/train-00000.arrow") and row == 3, ref=rows["train-00000_seg3"])
@@ -668,7 +853,7 @@ def check_migrated(base_cfg, tmp: Path) -> None:
     check("sidecar manifest + Arrow audio: same rows as the parquet source, null clips dropped",
           set(rows) == KEPT_SEGMENTS | {"train-00003_seg0"}
           and file == str(shards / "train-00000.arrow") and row == 3 and meta["drops"].get("no_audio") == 3
-          and meta["drops"].get("keep_filter") == 1 and meta["drops"].get("too_short") == 1,
+          and meta["drops"].get("keep:qa_risk_level") == 1 and meta["drops"].get("too_short") == 1,
           kept=sorted(rows), drops=meta["drops"])
     wave, rate = read_audio(rows["train-00001_seg1"])
     check("migrated ref decodes to the clip", rate == 24000 and abs(wave.shape[-1] / rate - 4.4) < 0.05,
@@ -699,6 +884,7 @@ def main() -> int:
         corpus = make_corpus(tmp)
         cfg = make_config(tmp, corpus)
         check_policy()
+        check_keep()
         check_chunks(corpus)
         metas = check_build(cfg, corpus)
         check_fingerprints(cfg, metas)
@@ -710,6 +896,8 @@ def main() -> int:
         check_grouping()
         check_val_groups()
         check_loader(cfg)
+        check_silence_pad(cfg)
+        check_language_balance(cfg)
         check_embedded(cfg, tmp)
         check_migrated(cfg, tmp)
     finally:

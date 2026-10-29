@@ -26,7 +26,7 @@ import numpy as np
 import pyarrow as pa
 from omegaconf import OmegaConf
 
-from chrome.data.manifest import Columns, first_value, iter_rows, manifest_stamp, plan_chunks, row_kept
+from chrome.data.manifest import Columns, first_value, iter_rows, keep_check, manifest_stamp, plan_chunks
 
 INDEX_VERSION = 1
 INDEX_FILE = "index.arrow"
@@ -87,6 +87,9 @@ class SourceSpec:
     max_records: int | None = None
     # Train rows up to this many hours of clips (the `seconds` column, as inspect reports), in hash order.
     max_hours: float | None = None
+    # Reorders the train rows before max_records / max_hours cut them, so another seed keeps another random
+    # subset. None: the path-hash order. The holdout split does not depend on it.
+    sample_seed: int | None = None
     # Shortest clip in seconds for this source; None: audio.min_seconds.
     min_seconds: int | None = None
     holdout_ppm: int = 500
@@ -117,6 +120,7 @@ class SourceSpec:
             caption_prefix=str(merged.get("caption_prefix") or ""),
             max_records=None if merged.get("max_records") in (None, "") else int(merged["max_records"]),
             max_hours=_optional_float(merged.get("max_hours")),
+            sample_seed=None if merged.get("sample_seed") in (None, "") else int(merged["sample_seed"]),
             min_seconds=None if merged.get("min_seconds") in (None, "") else int(merged["min_seconds"]),
             holdout_ppm=int(merged.get("holdout_ppm", 500)),
             include=_optional_str(merged.get("include")),
@@ -133,6 +137,8 @@ class SourceSpec:
             raise ValueError(f"{spec.name}: max_hours must be >= 0")
         if spec.min_seconds is not None and spec.min_seconds < 1:
             raise ValueError(f"{spec.name}: min_seconds must be >= 1")
+        if spec.sample_seed is not None and spec.sample_seed < 0:
+            raise ValueError(f"{spec.name}: sample_seed must be >= 0")
         return spec
 
     def content(self) -> dict:
@@ -146,6 +152,9 @@ class SourceSpec:
             if data[key] is None:
                 # Indexes built before these keys existed keep their fingerprint.
                 data.pop(key)
+        if data["sample_seed"] is None or (self.max_records is None and self.max_hours is None):
+            # Without a cap every train row is kept whatever the order.
+            data.pop("sample_seed")
         return data
 
     def stamps(self) -> list[tuple[str, int, int]]:
@@ -208,6 +217,17 @@ def length_policy(cfg, spec: SourceSpec | None = None) -> LengthPolicy:
 
 def path_key(path: str) -> int:
     return int.from_bytes(hashlib.blake2b(path.encode("utf-8"), digest_size=8).digest(), "little")
+
+
+def sample_order(keys: np.ndarray, seed: int | None) -> np.ndarray:
+    """Sort keys for the cap: the path keys themselves, or a splitmix64 mix of key and seed."""
+    if seed is None:
+        return keys
+    with np.errstate(over="ignore"):
+        z = keys.astype(np.uint64) + np.uint64(seed + 1) * np.uint64(0x9E3779B97F4A7C15)
+        z = (z ^ (z >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+        z = (z ^ (z >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+        return z ^ (z >> np.uint64(31))
 
 
 def read_path_list(path: str | Path) -> set[str]:
@@ -294,6 +314,8 @@ def _scan_chunk(job: dict) -> dict:
     policy: LengthPolicy = job["policy"]
     exclude, bad = _WORKER["exclude"], _WORKER["bad"]
     drops: Counter = Counter()
+    # Rows that passed a keep range only because that field was missing (null, "" or NaN).
+    keep_missing: Counter = Counter()
     scanned = 0
     cols = {name: [] for name in ("path", "caption", "duration", "seconds", "sample_rate")}
     for row in iter_rows(job["chunk"]):
@@ -305,9 +327,12 @@ def _scan_chunk(job: dict) -> dict:
         if not path:
             drops["no_audio"] += 1
             continue
-        if spec.keep and not row_kept(row, spec.keep):
-            drops["keep_filter"] += 1
-            continue
+        if spec.keep:
+            failed, missing = keep_check(row, spec.keep)
+            if failed is not None:
+                drops[f"keep:{failed}"] += 1
+                continue
+            keep_missing.update(missing)
         path = str(path)
         caption = str(first_value(row, spec.columns.caption) or "").strip()
         if not caption:
@@ -353,7 +378,7 @@ def _scan_chunk(job: dict) -> dict:
     )
     with pa.OSFile(job["dest"], "wb") as sink, pa.ipc.new_file(sink, SCHEMA) as writer:
         writer.write_table(table)
-    return {"scanned": scanned, "kept": table.num_rows, "drops": dict(drops)}
+    return {"scanned": scanned, "kept": table.num_rows, "drops": dict(drops), "keep_missing": dict(keep_missing)}
 
 
 # ---------------------------------------------------------------- build (parent side)
@@ -422,6 +447,7 @@ def build_source(spec: SourceSpec, cfg, workers: int, force: bool = False, log=p
     exclude = _paths_from(data.get("exclude"))
     bad = _paths_from([data["bad_list"], *(data.get("extra_bad_lists") or [])])
     drops: Counter = Counter()
+    keep_missing: Counter = Counter()
     scanned = kept = 0
     log(f"[index] {spec.name}: {len(chunks)} chunks from {len(stamps)} manifest file(s), {workers} workers")
     last = time.monotonic()
@@ -434,6 +460,7 @@ def build_source(spec: SourceSpec, cfg, workers: int, force: bool = False, log=p
                 scanned += result["scanned"]
                 kept += result["kept"]
                 drops.update(result["drops"])
+                keep_missing.update(result["keep_missing"])
                 if time.monotonic() - last > 10 or done == len(jobs):
                     last = time.monotonic()
                     log(
@@ -451,10 +478,10 @@ def build_source(spec: SourceSpec, cfg, workers: int, force: bool = False, log=p
             keys = table["key"].to_numpy()
         holdout = (keys % HOLDOUT_SCALE) < spec.holdout_ppm
         train = ~holdout
-        # Hash order is a fixed random order, so both caps are stable across rebuilds, and raising one only
-        # adds rows.
+        # Hash order (mixed with sample_seed) is a fixed random order, so both caps are stable across rebuilds,
+        # and raising one only adds rows.
         rows = np.flatnonzero(train)
-        rows = rows[np.argsort(keys[rows], kind="stable")]
+        rows = rows[np.argsort(sample_order(keys[rows], spec.sample_seed), kind="stable")]
         cut = rows.size
         if spec.max_records is not None and cut > spec.max_records:
             drops["max_records"] += cut - spec.max_records
@@ -491,6 +518,7 @@ def build_source(spec: SourceSpec, cfg, workers: int, force: bool = False, log=p
         "train_rows": int(train.sum()),
         "holdout_rows": int(holdout.sum()),
         "drops": dict(sorted(drops.items(), key=lambda kv: -kv[1])),
+        "keep_missing": dict(sorted(keep_missing.items())),
         "train": _stats(table, train),
         "build_seconds": round(time.monotonic() - started, 1),
     }

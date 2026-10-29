@@ -1,10 +1,15 @@
 # 10B T2A at 20 s: the t2a_10b_s20_ws mixture plus CommonVoice 26.0 in 16 locales
-# (configs/data/sources_t2a_ws_cv.yaml), started from the EMA weights of t2a_10b_s20_ws. Fresh AdamW, fresh
-# data stream.
+# (configs/data/sources_t2a_ws_cv.yaml), started from the EMA weights of t2a_10b_s20_ws step 28000. Fresh
+# AdamW, fresh data stream.
 #
-# Indexes stay in index_s20 with data.exclude = preview_set_s20.json, so every s20_ws index is reused as it
-# is; only the 16 cv_* sources are built. The CommonVoice preview clips are holdout rows, so they live only
-# in preview.set.
+# Indexes stay in index_s20 with data.exclude = preview_set_s20.json, so the VR-Foley indexes of s20_ws are
+# reused as they are. The 16 cv_* sources are built here; hifitts2, zhizhou and the 30 ws_* sources rebuild
+# in place because this mixture adds quality filters (data.quality in configs/data/t2a_base.yaml: ws_large
+# for en / fr, ws_es, ws_cjk for zh / yue / ja / ko, ws_small for the rest, hifitts2 wer, zhizhou cer / dnsmos).
+# data.source_defaults.sample_seed below (2 since 2026-10-28, 1 before) draws a random subset of every capped
+# source (music at 1.5M); changing it rebuilds every capped source.
+# After that rebuild t2a_10b_s20_ws no longer resumes on its own indexes. The CommonVoice preview clips are holdout rows, so they
+# live only in preview.set.
 #
 # Val: as s20_ws (1237 VR-Foley clips + ws 256) plus the cv group: 256 holdout clips split evenly over its
 # 13 languages (~20 each). Loss logs per language as loss/cv/speech_<lang> and in sum as loss/cv.
@@ -13,12 +18,17 @@
 # Output: outputs/train/t2a_10b_s20_ws_cv/<YYYYMMDD_HHMMSS>/{config.yaml, log.jsonl, tb/, checkpoints/, samples/}
 #
 # bash scripts/data/prepare_commonvoice.sh                                                 # once, before indexing
-# bash scripts/data/build_index.sh --config configs/train/t2a_10b_s20_ws_cv.yaml data.build.workers=32
+# bash scripts/data/build_index.sh --config configs/train/t2a_10b_s20_ws_cv.yaml data.build.workers=32   # rebuilds the stale sources only
+# bash scripts/data/build_index.sh --config configs/train/t2a_10b_s20_ws_cv.yaml data.quality.ws_cjk.cer_max=0.25   # try a threshold; to train on it, set data.quality in this file
 # bash scripts/data/inspect_data.sh --config configs/train/t2a_10b_s20_ws_cv.yaml
 # bash scripts/train/dump_preview_gt.sh configs/train/t2a_10b_s20_ws_cv.yaml --out outputs/eval/preview_gt_s20_ws_cv   # done 2026-10-23
 # bash scripts/data/bench_loader.sh --config configs/train/t2a_10b_s20_ws_cv.yaml bench.output_dir=outputs/data/bench_ws_cv
+# bash scripts/data/bench_loader.sh --config configs/train/t2a_10b_s20_ws_cv.yaml data.loader.silence_pad.enabled=true bench.dump=32 bench.output_dir=outputs/data/bench_ws_cv_pad   # listen to padded clips
 # bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20_ws_cv.yaml data.loader.subset=100 train.max_steps=20 train.run_name=t2a_10b_s20_ws_cv_dry
 # bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20_ws_cv.yaml
+# bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20_ws_cv.yaml data.loader.silence_pad.enabled=true   # with silence padding; =false (default) is the previous training
+# bash scripts/data/inspect_data.sh --config configs/train/t2a_10b_s20_ws_cv.yaml data.loader.language_balance.enabled=true inspect.world_size=7 inspect.grad_accum=2   # shares / epochs per language
+# bash scripts/train/train_t2a.sh configs/train/t2a_10b_s20_ws_cv.yaml data.loader.language_balance.enabled=true data.loader.language_balance.alpha=0.8 data.loader.language_balance.max_epochs=10   # small languages drawn more often
 # Re-running the same command resumes the newest stamp of outputs/train/t2a_10b_s20_ws_cv.
 # CUDA_VISIBLE_DEVICES=0 bash scripts/infer/infer_t2a.sh outputs/train/t2a_10b_s20_ws_cv infer.seconds=8 'infer.prompts=["[SPEECH]: <d>[Italian][Italian][Female][Adult] Buongiorno a tutti, oggi parliamo della storia di Roma.</d>"]'
 # bash scripts/train/dump_preview_gt.sh outputs/train/t2a_10b_s20_ws_cv
@@ -27,12 +37,30 @@ _base_: [t2a_10b_s20_ws.yaml, ../data/sources_t2a_ws_cv.yaml]
 
 train:
   run_name: t2a_10b_s20_ws_cv
-  # Weights only: the latest checkpoint of the s20_ws run at launch. Pin a step (…/checkpoints/step_00NNNNN)
-  # to make the start reproducible.
-  init_from: ${paths.output_root}/train/t2a_10b_s20_ws/20261021_210505
+  # Weights only (no optimizer / data state): the last checkpoint of the s20_ws run (stopped at step 28100).
+  init_from: ${paths.output_root}/train/t2a_10b_s20_ws/20261021_210505/checkpoints/step_0028000
   init_weights: ema
+  # 2 packed micro-batches per rank and step (~435 clips over 8 ranks, ~10.5 s/step).
+  grad_accum: 2
   max_steps: 100000
   warmup_steps: 1000
+
+data:
+  source_defaults:
+    # A fresh random subset of every capped source (music, hifitts2, zhizhou, ws en / fr / es, cv en / de /
+    # fr / es) instead of the path-hash prefix s20_ws trained on. Holdout and val clips stay the same.
+    # 1 = the run of 2026-10-23 / 10-27; 2 = the next one (expected overlap with seed 1 ≈ cap / pool:
+    # music ~35%, hifitts2 ~29%, zhizhou ~56%, cv_en ~17%).
+    sample_seed: 2
+  loader:
+    # Speech clips padded with silence from their batch's spare rows (data.loader.silence_pad in
+    # configs/data/t2a_base.yaml). true / false only toggles that; batches and resume state are unchanged.
+    silence_pad:
+      enabled: false
+    # Small languages drawn more often (data.loader.language_balance in configs/data/t2a_base.yaml:
+    # alpha 0.8, max_epochs 10). Off = mix by rows as before; either way resumes without a rebuild.
+    language_balance:
+      enabled: false
 
 preview:
   # preview_set_s20_ws.json plus one CommonVoice holdout clip per language.

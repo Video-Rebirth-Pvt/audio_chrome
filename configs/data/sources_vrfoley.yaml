@@ -16,6 +16,7 @@
 #   long: drop | crop    clips past max_seconds + slack
 #   caption_prefix, max_records, holdout_ppm
 #   min_seconds (optional): this source's shortest clip; omit it to follow audio.min_seconds
+#   sample_seed (optional): another seed keeps another random subset under max_records / max_hours
 #   weight (optional): only if you must over/under-sample a source after the cap.
 #     omit it and the loader samples in proportion to the rows you kept.
 data:

@@ -15,8 +15,28 @@
 # per language for the cv validation group and the preview set.
 #
 # A list replaces, it does not merge: everything above the CommonVoice block is copied from
-# sources_t2a_ws.yaml (and the `worldspeech_source` anchor with it). Keep both in sync, or the index
-# fingerprints of the copies stop matching.
+# sources_t2a_ws.yaml (and the `worldspeech_source` anchor with it), except the quality filters on
+# hifitts2 and the ws_* sources below. Keep the rest in sync, or the index fingerprints stop matching.
+#
+# hifitts2 keeps wer <= data.quality.hifitts2.wer_max (0.18); zhizhou keeps bw_flag ok / likely_8k (ok only
+# in sources_t2a_ws.yaml), loudness_flag normal / quiet / loud, cer <= 0.22 (0.25) and dnsmos >= 2.2
+# (data.quality.zhizhou): both rebuild in place like the ws_* sources. CommonVoice keeps loudness_flag
+# normal / quiet / loud (data.quality.cv).
+# music keeps 1.5M rows (2M in sources_t2a_ws.yaml). With data.source_defaults.sample_seed set (the train
+# config does), every capped source also draws a new random subset and rebuilds.
+#
+# WorldSpeech quality tiers (data.quality in configs/data/t2a_base.yaml; a missing snr / dnsmos_ovr passes),
+# unlike sources_t2a_ws.yaml (cer <= 0.25 only):
+#   &ws_en     en, rows over the 500k budget:       cer <= 0.15, snr >= 8, dnsmos_ovr >= 2.5
+#   &ws_large  fr, over budget too:                 cer <= 0.2,  snr >= 8, dnsmos_ovr >= 2.5
+#   &ws_es     es, over budget too:                 cer <= 0.2,  snr >= 6, dnsmos_ovr >= 2.5
+#   &ws_cjk    zh_tw / yue_hk / ja_jp / ko_kr:      cer <= 0.22, snr >= 3, dnsmos_ovr >= 2 (per-character cer)
+#   &ws        the other languages:                 cer <= 0.2,  snr >= 3, dnsmos_ovr >= 2
+# So every ws_* source (and hifitts2, zhizhou) differs from the s20_ws indexes in index_s20 and rebuilds there in
+# place, after which t2a_10b_s20_ws sees them as stale. Rebuild only once the s20_ws run has stopped: its loader workers
+# reopen index.arrow and would read the new rows by the old row numbers.
+# en / fr / es max_records = 500k × the locale's share of its language under its tier, counted from the
+# sidecars (fr / es 2026-10-23, en 2026-10-28); recompute them whenever data.quality.ws_en / ws_large / ws_es changes.
 #
 # bash scripts/data/prepare_commonvoice.sh
 # bash scripts/data/build_index.sh --config configs/train/t2a_10b_s20_ws_cv.yaml
@@ -30,13 +50,82 @@ worldspeech_source: &ws
   columns: {audio: audio, caption: resp, duration: duration}
   keep:
     qa_risk_level: [clean, medium]
-    cer: {max: 0.25, allow_missing: false}
+    # Thresholds in data.quality.ws_small (configs/data/t2a_base.yaml); a missing snr / dnsmos_ovr passes.
+    cer:
+      max: ${data.quality.ws_small.cer_max}
+      allow_missing: false
+    snr:
+      min: ${data.quality.ws_small.snr_min}
+      allow_missing: true
+    dnsmos_ovr:
+      min: ${data.quality.ws_small.dnsmos_ovr_min}
+      allow_missing: true
+
+# The tiers below differ only in keep. The merge is shallow: each keep replaces the whole keep of &ws.
+worldspeech_large: &ws_large
+  <<: *ws
+  keep:
+    qa_risk_level: [clean, medium]
+    cer:
+      max: ${data.quality.ws_large.cer_max}
+      allow_missing: false
+    snr:
+      min: ${data.quality.ws_large.snr_min}
+      allow_missing: true
+    dnsmos_ovr:
+      min: ${data.quality.ws_large.dnsmos_ovr_min}
+      allow_missing: true
+
+worldspeech_en: &ws_en
+  <<: *ws
+  keep:
+    qa_risk_level: [clean, medium]
+    cer:
+      max: ${data.quality.ws_en.cer_max}
+      allow_missing: false
+    snr:
+      min: ${data.quality.ws_en.snr_min}
+      allow_missing: true
+    dnsmos_ovr:
+      min: ${data.quality.ws_en.dnsmos_ovr_min}
+      allow_missing: true
+
+worldspeech_es: &ws_es
+  <<: *ws
+  keep:
+    qa_risk_level: [clean, medium]
+    cer:
+      max: ${data.quality.ws_es.cer_max}
+      allow_missing: false
+    snr:
+      min: ${data.quality.ws_es.snr_min}
+      allow_missing: true
+    dnsmos_ovr:
+      min: ${data.quality.ws_es.dnsmos_ovr_min}
+      allow_missing: true
+
+worldspeech_cjk: &ws_cjk
+  <<: *ws
+  keep:
+    qa_risk_level: [clean, medium]
+    cer:
+      max: ${data.quality.ws_cjk.cer_max}
+      allow_missing: false
+    snr:
+      min: ${data.quality.ws_cjk.snr_min}
+      allow_missing: true
+    dnsmos_ovr:
+      min: ${data.quality.ws_cjk.dnsmos_ovr_min}
+      allow_missing: true
 
 commonvoice_source: &cv
   # One val group: 256 clips for all of CommonVoice, split evenly over languages; loss logs as cv/<task>, cv.
   group: cv
   columns: {caption: resp, duration: duration}
   holdout_ppm: 2000
+  # data.quality.cv (configs/data/t2a_base.yaml): drops silence / hot.
+  keep:
+    loudness_flag: ${data.quality.cv.loudness_flag}
 
 data:
   sources:
@@ -44,7 +133,8 @@ data:
     - name: music
       task: music
       min_seconds: 4
-      max_records: 2000000
+      # 4.3M train rows pass the filters.
+      max_records: 1500000
       # A cut-off song plus silence sounds wrong; drop the tail instead.
       fit: crop
       columns: {caption: resp_new}
@@ -71,6 +161,11 @@ data:
       task: speech_en
       max_records: 3000000
       columns: {caption: resp, duration: duration}
+      # Threshold in data.quality.hifitts2 (configs/data/t2a_base.yaml).
+      keep:
+        wer:
+          max: ${data.quality.hifitts2.wer_max}
+          allow_missing: false
       paths:
         - ${paths.data_root}/SPEECH/hifitts-2/manifest_44khz.jsonl
     # 16 kHz mono; nothing above 8 kHz after resampling to 32 kHz.
@@ -78,51 +173,68 @@ data:
       task: speech_zh
       max_records: 5000000
       columns: {caption: resp, duration: duration}
+      # Thresholds in data.quality.zhizhou (configs/data/t2a_base.yaml); a missing cer / dnsmos passes.
       keep:
-        bw_flag: ok
-        cer: {max: 0.25}
+        bw_flag: ${data.quality.zhizhou.bw_flag}
+        loudness_flag: ${data.quality.zhizhou.loudness_flag}
+        cer:
+          max: ${data.quality.zhizhou.cer_max}
+        dnsmos:
+          min: ${data.quality.zhizhou.dnsmos_min}
+          allow_missing: true
       paths:
         - ${paths.data_root}/zhizhou_soul/manifest_16khz.jsonl
-    # Arabic, 179k rows (Iraqi and Kuwaiti parliaments carry 93%)
+    # Arabic, 157k rows under ws_small (Iraqi and Kuwaiti parliaments carry 95%)
     - {<<: *ws, name: ws_ar_bh, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_bh"]}
     - {<<: *ws, name: ws_ar_iq, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_iq"]}
     - {<<: *ws, name: ws_ar_kw, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_kw"]}
     - {<<: *ws, name: ws_ar_ma, task: speech_ar, paths: ["${paths.qa_sidecar_root}/ar_ma"]}
-    # Chinese, 293k rows: Taiwan Mandarin (Legislative Yuan) and Cantonese (LegCo), traditional characters
-    - {<<: *ws, name: ws_zh_tw, task: speech_zh, paths: ["${paths.qa_sidecar_root}/zh_tw"]}
-    - {<<: *ws, name: ws_yue_hk, task: speech_zh, paths: ["${paths.qa_sidecar_root}/yue_hk"]}
-    # English, 735k rows (US House 622k), capped to 500k (×0.680)
-    - {<<: *ws, name: ws_en_au, task: speech_en, max_records: 4023, paths: ["${paths.qa_sidecar_root}/en_au"]}
-    - {<<: *ws, name: ws_en_jm, task: speech_en, max_records: 1335, paths: ["${paths.qa_sidecar_root}/en_jm"]}
-    - {<<: *ws, name: ws_en_ke, task: speech_en, max_records: 19837, paths: ["${paths.qa_sidecar_root}/en_ke"]}
-    - {<<: *ws, name: ws_en_nz, task: speech_en, max_records: 4526, paths: ["${paths.qa_sidecar_root}/en_nz"]}
-    - {<<: *ws, name: ws_en_sl, task: speech_en, max_records: 11803, paths: ["${paths.qa_sidecar_root}/en_sl"]}
-    - {<<: *ws, name: ws_en_us, task: speech_en, max_records: 423170, paths: ["${paths.qa_sidecar_root}/en_us"]}
-    - {<<: *ws, name: ws_en_zm, task: speech_en, max_records: 35306, paths: ["${paths.qa_sidecar_root}/en_zm"]}
-    # French, 1.21M rows, nearly all Quebec National Assembly (ca_fr committees, fr_ca plenary), capped to 500k (×0.414)
-    - {<<: *ws, name: ws_ca_fr, task: speech_fr, max_records: 425908, paths: ["${paths.qa_sidecar_root}/ca_fr"]}
-    - {<<: *ws, name: ws_fr_ca, task: speech_fr, max_records: 72264, paths: ["${paths.qa_sidecar_root}/fr_ca"]}
-    - {<<: *ws, name: ws_fr_cd, task: speech_fr, max_records: 1828, paths: ["${paths.qa_sidecar_root}/fr_cd"]}
-    # German, 230k rows: Austria and Liechtenstein only
+    # Chinese, 213k rows under ws_cjk (286k at cer <= 0.25): Taiwan Mandarin (Legislative Yuan) 144k and
+    # Cantonese (LegCo) 69k, traditional characters. Cantonese is its own task (speech_yue) for val groups and
+    # data.loader.language_balance; zhizhou's Cantonese rows stay in speech_zh.
+    - {<<: *ws_cjk, name: ws_zh_tw, task: speech_zh, paths: ["${paths.qa_sidecar_root}/zh_tw"]}
+    - {<<: *ws_cjk, name: ws_yue_hk, task: speech_yue, paths: ["${paths.qa_sidecar_root}/yue_hk"]}
+    # English, 576k rows under ws_en (US House 528k; 647k at cer 0.2), capped to 500k (×0.868)
+    - {<<: *ws_en, name: ws_en_au, task: speech_en, max_records: 3156, paths: ["${paths.qa_sidecar_root}/en_au"]}
+    - {<<: *ws_en, name: ws_en_jm, task: speech_en, max_records: 842, paths: ["${paths.qa_sidecar_root}/en_jm"]}
+    - {<<: *ws_en, name: ws_en_ke, task: speech_en, max_records: 11108, paths: ["${paths.qa_sidecar_root}/en_ke"]}
+    - {<<: *ws_en, name: ws_en_nz, task: speech_en, max_records: 548, paths: ["${paths.qa_sidecar_root}/en_nz"]}
+    - {<<: *ws_en, name: ws_en_sl, task: speech_en, max_records: 7263, paths: ["${paths.qa_sidecar_root}/en_sl"]}
+    - {<<: *ws_en, name: ws_en_us, task: speech_en, max_records: 457954, paths: ["${paths.qa_sidecar_root}/en_us"]}
+    - {<<: *ws_en, name: ws_en_zm, task: speech_en, max_records: 19129, paths: ["${paths.qa_sidecar_root}/en_zm"]}
+    # French, 533k rows under ws_large, nearly all Quebec National Assembly (ca_fr committees, fr_ca plenary),
+    # capped to 500k (×0.939)
+    - {<<: *ws_large, name: ws_ca_fr, task: speech_fr, max_records: 401301, paths: ["${paths.qa_sidecar_root}/ca_fr"]}
+    - {<<: *ws_large, name: ws_fr_ca, task: speech_fr, max_records: 95106, paths: ["${paths.qa_sidecar_root}/fr_ca"]}
+    - {<<: *ws_large, name: ws_fr_cd, task: speech_fr, max_records: 3593, paths: ["${paths.qa_sidecar_root}/fr_cd"]}
+    # German, 196k rows under ws_small: Austria and Liechtenstein only
     - {<<: *ws, name: ws_de_at, task: speech_de, paths: ["${paths.qa_sidecar_root}/de_at"]}
     - {<<: *ws, name: ws_de_li, task: speech_de, paths: ["${paths.qa_sidecar_root}/de_li"]}
-    # Japanese 74k, Korean 78k, Russian 38k rows
-    - {<<: *ws, name: ws_ja_jp, task: speech_ja, paths: ["${paths.qa_sidecar_root}/ja_jp"]}
-    - {<<: *ws, name: ws_ko_kr, task: speech_ko, paths: ["${paths.qa_sidecar_root}/ko_kr"]}
+    # Japanese 56k, Korean 66k under ws_cjk (71k, 78k at cer <= 0.25); Russian 32k under ws_small (38k)
+    - {<<: *ws_cjk, name: ws_ja_jp, task: speech_ja, paths: ["${paths.qa_sidecar_root}/ja_jp"]}
+    - {<<: *ws_cjk, name: ws_ko_kr, task: speech_ko, paths: ["${paths.qa_sidecar_root}/ko_kr"]}
     - {<<: *ws, name: ws_ru_ru, task: speech_ru, paths: ["${paths.qa_sidecar_root}/ru_ru"]}
-    # Spanish, 1.32M rows, capped to 500k (×0.378)
-    - {<<: *ws, name: ws_es_ar, task: speech_es, max_records: 13693, paths: ["${paths.qa_sidecar_root}/es_ar"]}
-    - {<<: *ws, name: ws_es_cl, task: speech_es, max_records: 100815, paths: ["${paths.qa_sidecar_root}/es_cl"]}
-    - {<<: *ws, name: ws_es_co, task: speech_es, max_records: 10238, paths: ["${paths.qa_sidecar_root}/es_co"]}
-    - {<<: *ws, name: ws_es_es, task: speech_es, max_records: 203540, paths: ["${paths.qa_sidecar_root}/es_es"]}
-    - {<<: *ws, name: ws_es_mx, task: speech_es, max_records: 70283, paths: ["${paths.qa_sidecar_root}/es_mx"]}
-    - {<<: *ws, name: ws_es_pe, task: speech_es, max_records: 26876, paths: ["${paths.qa_sidecar_root}/es_pe"]}
-    - {<<: *ws, name: ws_es_pr, task: speech_es, max_records: 17606, paths: ["${paths.qa_sidecar_root}/es_pr"]}
-    - {<<: *ws, name: ws_es_py, task: speech_es, max_records: 9872, paths: ["${paths.qa_sidecar_root}/es_py"]}
-    - {<<: *ws, name: ws_es_uy, task: speech_es, max_records: 47077, paths: ["${paths.qa_sidecar_root}/es_uy"]}
+    # Spanish, 761k rows under ws_es (es_es 211k, 28%; 89k at snr >= 8), capped to 500k (×0.657)
+    - {<<: *ws_es, name: ws_es_ar, task: speech_es, max_records: 16047, paths: ["${paths.qa_sidecar_root}/es_ar"]}
+    - {<<: *ws_es, name: ws_es_cl, task: speech_es, max_records: 120095, paths: ["${paths.qa_sidecar_root}/es_cl"]}
+    - {<<: *ws_es, name: ws_es_co, task: speech_es, max_records: 14254, paths: ["${paths.qa_sidecar_root}/es_co"]}
+    - {<<: *ws_es, name: ws_es_es, task: speech_es, max_records: 138759, paths: ["${paths.qa_sidecar_root}/es_es"]}
+    - {<<: *ws_es, name: ws_es_mx, task: speech_es, max_records: 78158, paths: ["${paths.qa_sidecar_root}/es_mx"]}
+    - {<<: *ws_es, name: ws_es_pe, task: speech_es, max_records: 34051, paths: ["${paths.qa_sidecar_root}/es_pe"]}
+    - {<<: *ws_es, name: ws_es_pr, task: speech_es, max_records: 24043, paths: ["${paths.qa_sidecar_root}/es_pr"]}
+    - {<<: *ws_es, name: ws_es_py, task: speech_es, max_records: 16328, paths: ["${paths.qa_sidecar_root}/es_py"]}
+    - {<<: *ws_es, name: ws_es_uy, task: speech_es, max_records: 58265, paths: ["${paths.qa_sidecar_root}/es_uy"]}
     # ---------------------------------------------------------------- CommonVoice 26.0
     # Capped: en 1.15M, de 637k, fr 614k, es 371k rows of 3–20 s
-    - {<<: *cv, name: cv_en, task: speech_en, max_records: 200000, paths: ["${paths.commonvoice_jsonl}/commonvoice_en_26.0.resp.jsonl"]}
+    # cv_en has no wer / cer; its keep replaces the anchor's, so it repeats loudness_flag.
+    - <<: *cv
+      name: cv_en
+      task: speech_en
+      max_records: 200000
+      keep:
+        loudness_flag: ${data.quality.cv.loudness_flag}
+        bw_flag: ${data.quality.cv.en_bw_flag}
+      paths: ["${paths.commonvoice_jsonl}/commonvoice_en_26.0.resp.jsonl"]
     - {<<: *cv, name: cv_de, task: speech_de, max_records: 300000, paths: ["${paths.commonvoice_jsonl}/commonvoice_de_26.0.resp.jsonl"]}
     - {<<: *cv, name: cv_fr, task: speech_fr, max_records: 300000, paths: ["${paths.commonvoice_jsonl}/commonvoice_fr_26.0.resp.jsonl"]}
     - {<<: *cv, name: cv_es, task: speech_es, max_records: 300000, paths: ["${paths.commonvoice_jsonl}/commonvoice_es_26.0.resp.jsonl"]}
@@ -136,8 +248,8 @@ data:
     - {<<: *cv, name: cv_ja, task: speech_ja, paths: ["${paths.commonvoice_jsonl}/commonvoice_ja_26.0.resp.jsonl"]}
     - {<<: *cv, name: cv_ko, task: speech_ko, holdout_ppm: 20000, paths: ["${paths.commonvoice_jsonl}/commonvoice_ko_26.0.resp.jsonl"]}
     - {<<: *cv, name: cv_ru, task: speech_ru, paths: ["${paths.commonvoice_jsonl}/commonvoice_ru_26.0.resp.jsonl"]}
-    # Chinese, speech_zh as in WorldSpeech: Mandarin 45k, Taiwan Mandarin 11k, Cantonese (yue 15k, zh-HK 16k)
+    # Chinese: Mandarin 45k, Taiwan Mandarin 11k (speech_zh); Cantonese yue 15k, zh-HK 16k (speech_yue, as ws_yue_hk)
     - {<<: *cv, name: cv_zh_cn, task: speech_zh, paths: ["${paths.commonvoice_jsonl}/commonvoice_zh-CN_26.0.resp.jsonl"]}
     - {<<: *cv, name: cv_zh_tw, task: speech_zh, paths: ["${paths.commonvoice_jsonl}/commonvoice_zh-TW_26.0.resp.jsonl"]}
-    - {<<: *cv, name: cv_yue, task: speech_zh, paths: ["${paths.commonvoice_jsonl}/commonvoice_yue_26.0.resp.jsonl"]}
-    - {<<: *cv, name: cv_zh_hk, task: speech_zh, paths: ["${paths.commonvoice_jsonl}/commonvoice_zh-HK_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_yue, task: speech_yue, paths: ["${paths.commonvoice_jsonl}/commonvoice_yue_26.0.resp.jsonl"]}
+    - {<<: *cv, name: cv_zh_hk, task: speech_yue, paths: ["${paths.commonvoice_jsonl}/commonvoice_zh-HK_26.0.resp.jsonl"]}
